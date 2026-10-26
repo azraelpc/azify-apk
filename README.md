@@ -8,11 +8,31 @@ No server, account, password or personal library is included in the APK.
 ## Connect
 
 Open AZify, enter your **AZify Server URL**, and select **Connect**. The URL is
-empty on a fresh installation. Use an HTTPS origin such as `https://example.com/`,
-without a subpath or query parameters. A local HTTP server needs an HTTPS reverse
-proxy or tunnel. No server changes are required.
+empty on a fresh installation. HTTP and HTTPS URLs, custom ports and subpaths are
+supported, for example:
 
-The app first requests `/api/music` without credentials. Public servers open
+- `https://example.com/`
+- `https://example.com:8443/azify/`
+- `http://192.0.2.10:5155/`
+- `http://example.com:5155/apps/music/`
+
+A missing trailing slash is added automatically. Embedded credentials, query
+parameters and fragments are rejected. HTTPS is recommended. With an HTTP URL,
+the unchecked **Allow insecure HTTP** option and a warning appear. You must
+explicitly enable it before any connection is attempted: HTTP exposes your
+password credential and music to interception. The choice is remembered only
+with that saved URL, resets when editing the URL, and is cleared on Sign out.
+
+The configured URL is the application base, not the API endpoint. For
+`https://example.com/azify/`, the client requests `/azify/api/music`, maps catalog
+paths such as `/music/Album/track.mp3` to `/azify/music/Album/track.mp3`, and loads
+fallback artwork from `/azify/nocover.jpg`. A reverse proxy must route those paths
+to the same Azify instance, usually stripping the `/azify/` prefix. The stock
+server does not need source changes for that arrangement. Mounting the original
+website under a subpath may additionally require adapting its absolute web paths;
+the Android client handles its own base-path resolution.
+
+The app first requests `api/music` relative to the base URL without credentials. Public servers open
 directly; only HTTP 401 reveals the password field. Network errors, HTTP 403
 and invalid catalogs are not treated as password prompts.
 
@@ -60,7 +80,8 @@ service time limits can interrupt long-running downloads.
 
 Storage is not automatically evicted. Remove downloads to reclaim space.
 Uninstalling or clearing app data deletes them. Downloads and catalogs are kept
-separate by server origin and are never copied into a build artifact.
+separate by server base URL (including scheme, port and subpath) and are never
+copied into a build artifact.
 
 ## Android Auto
 
@@ -149,8 +170,10 @@ provided script does not uninstall packages.
 ## Security And Sharing
 
 The generic package is `org.azify.client`. It does not inherit data from older
-personalized app identifiers. HTTPS, same-origin checks and disabled redirects
-prevent credentials being sent to a different server. Credentials are sent only
+personalized app identifiers. HTTPS is recommended; HTTP requires explicit
+consent and offers no transport encryption. Matching the configured scheme,
+host, port and media path, together with disabled redirects, prevents credentials
+being forwarded to a different application base or server. Credentials are sent only
 through `X-Azify-Pass`, never in URLs. Trusted media controllers receive artwork
 through a read-only ContentProvider. Only AZify can change connection settings.
 

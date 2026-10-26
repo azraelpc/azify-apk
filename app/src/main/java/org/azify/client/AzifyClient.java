@@ -61,11 +61,28 @@ final class AzifyClient {
             throw new IllegalArgumentException("Enter the AZify Server URL.");
         }
         HttpUrl url = HttpUrl.get(input.trim());
-        if (!url.isHttps() || !url.username().isEmpty() || !url.password().isEmpty()
-                || !url.encodedPath().equals("/") || url.query() != null || url.fragment() != null) {
-            throw new IllegalArgumentException("Use the HTTPS server address without a path or query parameters.");
+        if (!url.username().isEmpty() || !url.password().isEmpty()
+                || url.query() != null || url.fragment() != null) {
+            throw new IllegalArgumentException("Use an HTTP or HTTPS base URL without credentials, query parameters or fragments.");
         }
-        return url.toString();
+        return url.encodedPath().endsWith("/") ? url.toString()
+                : url.newBuilder().addPathSegment("").build().toString();
+    }
+
+    static HttpUrl endpoint(String server, String relativePath) {
+        return HttpUrl.get(normalizeServer(server)).newBuilder().addPathSegments(relativePath).build();
+    }
+
+    static boolean isArtworkUrl(String server, String target) {
+        try {
+            mediaHeaders(server, "", target);
+            HttpUrl requested = HttpUrl.get(target);
+            return requested.query() == null && requested.fragment() == null
+                    && (requested.encodedPath().startsWith(endpoint(server, "music/").encodedPath())
+                    || requested.encodedPath().equals(endpoint(server, "nocover.jpg").encodedPath()));
+        } catch (IOException | IllegalArgumentException invalid) {
+            return false;
+        }
     }
 
     static String passwordHash(String password) {
@@ -88,19 +105,27 @@ final class AzifyClient {
     }
 
     static Map<String, String> mediaHeaders(String server, String token, String target) throws IOException {
-        HttpUrl configured = HttpUrl.parse(server);
+        HttpUrl configured;
+        try {
+            configured = HttpUrl.get(normalizeServer(server));
+        } catch (IllegalArgumentException invalid) {
+            throw new IOException("The AZify Server URL is not configured.", invalid);
+        }
         HttpUrl requested = HttpUrl.parse(target);
-        if (configured == null || requested == null || !configured.isHttps() || !requested.isHttps()
+        if (requested == null || !configured.scheme().equals(requested.scheme())
                 || !configured.host().equals(requested.host()) || configured.port() != requested.port()
-                || !requested.username().isEmpty() || !requested.password().isEmpty()) {
+                || !requested.username().isEmpty() || !requested.password().isEmpty()
+                || !(requested.encodedPath().startsWith(endpoint(server, "music/").encodedPath())
+                || requested.encodedPath().equals(endpoint(server, "nocover.jpg").encodedPath()))) {
             throw new IOException("This resource does not belong to the configured AZify Server URL.");
         }
         return headers(token);
     }
 
     Catalog fetch(String server, String token) throws IOException {
+        String base = normalizeServer(server);
         Request.Builder request = new Request.Builder()
-                .url(HttpUrl.get(server).newBuilder().encodedPath("/api/music").build());
+            .url(endpoint(base, "api/music"));
         headers(token).forEach(request::header);
         try (Response response = http.newCall(request.build()).execute()) {
             if (response.code() == 401) {
@@ -110,7 +135,7 @@ final class AzifyClient {
                 throw new IOException("The server returned HTTP " + response.code() + ".");
             }
             try {
-                return Catalog.parse(response.body().string(), server);
+                return Catalog.parse(response.body().string(), base);
             } catch (JSONException | IllegalArgumentException malformed) {
                 throw new IOException("The server did not return a valid Azify catalog.", malformed);
             }

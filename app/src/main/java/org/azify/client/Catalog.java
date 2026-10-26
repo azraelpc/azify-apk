@@ -79,7 +79,7 @@ final class Catalog {
             String albumId = "album:" + folder;
             String cover = source.optString("cover", "/music/default.jpg");
             String artwork = cover.equals("/music/default.jpg")
-                    ? HttpUrl.get(server).newBuilder().encodedPath("/nocover.jpg").build().toString()
+                    ? AzifyClient.endpoint(server, "nocover.jpg").toString()
                     : mediaUrl(server, cover);
             Entry album = new Entry(albumId, name, folder, Kind.ALBUM, null, artwork, name);
             catalog.add(album);
@@ -174,8 +174,8 @@ final class Catalog {
         if (!file.startsWith("/music/")) {
             throw new IllegalArgumentException("Invalid audio path");
         }
-        HttpUrl.Builder builder = HttpUrl.get(server).newBuilder()
-                .encodedPath("/").query(null).fragment(null).addPathSegment("music");
+        HttpUrl.Builder builder = HttpUrl.get(AzifyClient.normalizeServer(server)).newBuilder()
+            .addPathSegment("music");
         for (String segment : file.substring(7).split("/", -1)) {
             if (segment.isEmpty()) {
                 continue;

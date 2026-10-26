@@ -26,6 +26,7 @@ import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.RadioGroup;
 import android.widget.PopupMenu;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import androidx.activity.OnBackPressedCallback;
@@ -491,6 +492,20 @@ public final class MainActivity extends AppCompatActivity {
         server.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         server.setText(account.server);
         form.addView(server, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout insecureFields = new LinearLayout(this);
+        insecureFields.setOrientation(LinearLayout.VERTICAL);
+        insecureFields.setVisibility(account.server.startsWith("http://") ? View.VISIBLE : View.GONE);
+        CheckBox allowHttp = new CheckBox(this);
+        allowHttp.setId(R.id.allow_insecure_http);
+        allowHttp.setText(R.string.allow_insecure_http);
+        allowHttp.setChecked(account.allowInsecureHttp);
+        allowHttp.setSaveEnabled(false);
+        insecureFields.addView(allowHttp, new LinearLayout.LayoutParams(-1, -2));
+        TextView insecureWarning = new TextView(this);
+        insecureWarning.setText(R.string.insecure_http_warning);
+        insecureWarning.setTextColor(Color.rgb(245, 190, 110));
+        insecureFields.addView(insecureWarning, new LinearLayout.LayoutParams(-1, -2));
+        form.addView(insecureFields, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout passwordFields = new LinearLayout(this);
         passwordFields.setOrientation(LinearLayout.VERTICAL);
         passwordFields.setVisibility(passwordRequired || account.requiresPassword ? View.VISIBLE : View.GONE);
@@ -510,6 +525,7 @@ public final class MainActivity extends AppCompatActivity {
         passwordFields.addView(remember, new LinearLayout.LayoutParams(-1, -2));
         form.addView(passwordFields, new LinearLayout.LayoutParams(-1, -2));
         TextView error = new TextView(this);
+        error.setId(R.id.connection_error);
         error.setPadding(0, padding / 2, 0, padding / 2);
         error.setTextColor(Color.rgb(245, 160, 160));
         form.addView(error, new LinearLayout.LayoutParams(-1, -2));
@@ -519,12 +535,17 @@ public final class MainActivity extends AppCompatActivity {
                 password.setText("");
                 passwordFields.setVisibility(View.GONE);
                 remember.setChecked(false);
+                allowHttp.setChecked(false);
+                insecureFields.setVisibility(value.toString().trim().toLowerCase(java.util.Locale.ROOT)
+                    .startsWith("http://") ? View.VISIBLE : View.GONE);
                 error.setText(null);
             }
             @Override public void afterTextChanged(Editable value) { }
         });
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(form);
         AlertDialog.Builder builder = new AlertDialog.Builder(this)
-                .setTitle(R.string.connection_title).setView(form)
+            .setTitle(R.string.connection_title).setView(scroll)
                 .setPositiveButton(R.string.connect, null).setNegativeButton(R.string.cancel, null);
         if (canSignOut) {
             builder.setNeutralButton(R.string.logout, (dialog, which) -> signOut());
@@ -540,13 +561,22 @@ public final class MainActivity extends AppCompatActivity {
                     error.setText(invalid.getMessage());
                     return;
                 }
+                if (normalized.startsWith("http://") && !allowHttp.isChecked()) {
+                    error.setText(R.string.insecure_http_not_allowed);
+                    return;
+                }
                 String entered = password.getText().toString();
                 String token = entered.isEmpty() && normalized.equals(account.server) ? account.token
                         : entered.isEmpty() ? "" : AzifyClient.passwordHash(entered);
                 boolean keepPassword = remember.isChecked();
+                boolean allowInsecure = allowHttp.isChecked();
                 password.setText("");
                 AlertDialog active = loginDialog;
                 active.setCancelable(false);
+                server.setEnabled(false);
+                password.setEnabled(false);
+                remember.setEnabled(false);
+                allowHttp.setEnabled(false);
                 active.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);
                 active.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);
                 if (canSignOut) {
@@ -556,7 +586,7 @@ public final class MainActivity extends AppCompatActivity {
                 ListenableFuture<AzifyClient.Connection> validation = workers.submit(() -> {
                     AzifyClient.Connection connection = new AzifyClient().connect(normalized, token);
                     Settings.get(MainActivity.this).save(normalized, connection.token,
-                            connection.requiresPassword, keepPassword);
+                            connection.requiresPassword, keepPassword, allowInsecure);
                         Downloads.get(MainActivity.this).saveCatalog(normalized, connection.catalog);
                     return connection;
                 });
@@ -574,6 +604,10 @@ public final class MainActivity extends AppCompatActivity {
                             return;
                         }
                         active.setCancelable(true);
+                        server.setEnabled(true);
+                        password.setEnabled(true);
+                        remember.setEnabled(true);
+                        allowHttp.setEnabled(true);
                         active.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);
                         active.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(true);
                         if (canSignOut) {

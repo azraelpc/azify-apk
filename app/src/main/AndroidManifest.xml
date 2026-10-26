@@ -9,7 +9,7 @@
     <application android:label="AZify" android:allowBackup="false" android:supportsRtl="true"
         android:icon="@drawable/ic_azify" android:theme="@style/Theme.Azify"
         android:fullBackupContent="false" android:dataExtractionRules="@xml/data_extraction_rules"
-        android:usesCleartextTraffic="false">
+        android:usesCleartextTraffic="true">
         <meta-data android:name="com.google.android.gms.car.application"
             android:resource="@xml/automotive_app_desc" />
         <activity android:name=".MainActivity" android:exported="true">

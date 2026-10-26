@@ -27,19 +27,27 @@ final class Settings {
         final boolean requiresPassword;
         final boolean rememberPassword;
         final boolean offlineAuthorized;
+        final boolean allowInsecureHttp;
 
         Snapshot(String server, String token, boolean configured,
             boolean requiresPassword, boolean rememberPassword, boolean offlineAuthorized) {
+            this(server, token, configured, requiresPassword, rememberPassword, offlineAuthorized, false);
+        }
+
+        Snapshot(String server, String token, boolean configured, boolean requiresPassword,
+                boolean rememberPassword, boolean offlineAuthorized, boolean allowInsecureHttp) {
             this.server = server;
             this.token = token;
             this.configured = configured;
             this.requiresPassword = requiresPassword;
             this.rememberPassword = rememberPassword;
             this.offlineAuthorized = offlineAuthorized;
+            this.allowInsecureHttp = allowInsecureHttp;
         }
 
         boolean sameAccount(Snapshot other) {
-            return server.equals(other.server) && token.equals(other.token);
+                return server.equals(other.server) && token.equals(other.token)
+                    && allowInsecureHttp == other.allowInsecureHttp;
         }
     }
 
@@ -79,9 +87,11 @@ final class Settings {
         if (!rememberPassword) {
             preferences.edit().remove("token").putBoolean("rememberPassword", false).apply();
         }
-        boolean configured = !server.isEmpty() && (!requiresPassword || !token.isEmpty());
+        boolean allowInsecureHttp = preferences.getBoolean("allowInsecureHttp", false);
+        boolean transportAllowed = !server.startsWith("http://") || allowInsecureHttp;
+        boolean configured = !server.isEmpty() && transportAllowed && (!requiresPassword || !token.isEmpty());
         snapshot = new Snapshot(server, token, configured, requiresPassword, rememberPassword,
-            preferences.getBoolean("offlineAuthorized", false));
+            preferences.getBoolean("offlineAuthorized", false) && transportAllowed, allowInsecureHttp);
     }
 
     Snapshot current() {
@@ -90,8 +100,18 @@ final class Settings {
 
     synchronized void save(String server, String token, boolean requiresPassword,
             boolean rememberPassword) throws GeneralSecurityException {
+        save(server, token, requiresPassword, rememberPassword, false);
+        }
+
+        synchronized void save(String server, String token, boolean requiresPassword,
+            boolean rememberPassword, boolean allowInsecureHttp) throws GeneralSecurityException {
         if (server.isEmpty() || (requiresPassword && token.isEmpty())) {
             throw new IllegalArgumentException("The connection is not configured.");
+        }
+        server = AzifyClient.normalizeServer(server);
+        boolean insecure = server.startsWith("http://");
+        if (insecure && !allowInsecureHttp) {
+            throw new IllegalArgumentException("Enable Allow insecure HTTP before connecting without encryption.");
         }
         boolean remember = requiresPassword && rememberPassword;
         String encrypted = "";
@@ -103,6 +123,7 @@ final class Settings {
                     Base64.NO_WRAP);
         }
         SharedPreferences.Editor update = preferences.edit().putString("server", server)
+            .putBoolean("allowInsecureHttp", insecure && allowInsecureHttp)
                 .putBoolean("requiresPassword", requiresPassword)
             .putBoolean("offlineAuthorized", true)
                 .putBoolean("rememberPassword", remember).remove("configured");
@@ -114,7 +135,8 @@ final class Settings {
         if (!update.commit()) {
             throw new GeneralSecurityException("Cannot save the connection.");
         }
-        snapshot = new Snapshot(server, requiresPassword ? token : "", true, requiresPassword, remember, true);
+        snapshot = new Snapshot(server, requiresPassword ? token : "", true, requiresPassword,
+            remember, true, insecure && allowInsecureHttp);
     }
 
     synchronized void signOut() {

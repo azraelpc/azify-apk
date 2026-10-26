@@ -296,7 +296,7 @@ public class MediaIntegrationTest {
             browser.stop();
             browser.clearMediaItems();
             snapshot.set(settings, new Settings.Snapshot(previous.server, "", false,
-                    previous.requiresPassword, false, true));
+                    previous.requiresPassword, false, true, previous.allowInsecureHttp));
             return null;
         });
         try {

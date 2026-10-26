@@ -48,11 +48,25 @@ public class SettingsTest {
             activity.get().findViewById(R.id.settings).performClick();
             Dialog dialog = ShadowDialog.getLatestDialog();
             assertNotNull(dialog);
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
             EditText server = dialog.findViewById(R.id.server_url);
             assertEquals("AZify Server URL", server.getHint().toString());
             assertEquals("", server.getText().toString());
             assertFalse(dialog.findViewById(R.id.server_password).isShown());
             assertFalse(((CheckBox) dialog.findViewById(R.id.remember_password)).isChecked());
+                CheckBox allowHttp = dialog.findViewById(R.id.allow_insecure_http);
+                assertFalse(allowHttp.isChecked());
+                assertFalse(allowHttp.isShown());
+                server.setText("http://example.com:5155/player/");
+                assertTrue(allowHttp.isShown());
+                assertFalse(allowHttp.isChecked());
+                ((androidx.appcompat.app.AlertDialog) dialog).getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE)
+                    .performClick();
+                assertEquals(activity.get().getString(R.string.insecure_http_not_allowed),
+                    ((android.widget.TextView) dialog.findViewById(R.id.connection_error)).getText().toString());
+                allowHttp.setChecked(true);
+                server.setText("http://other.example:5155/player/");
+                assertFalse(allowHttp.isChecked());
         } finally {
             activity.destroy();
         }
@@ -132,5 +146,31 @@ public class SettingsTest {
     @Test(expected = IllegalArgumentException.class)
     public void protectedSessionCannotBeSavedWithoutItsCredential() throws Exception {
         new Settings(preferences).save(SERVER, "", true, true);
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void httpCannotBeSavedWithoutExplicitConsent() throws Exception {
+        new Settings(preferences).save("http://example.com:5155/player/", "", false, false);
+    }
+
+    @Test public void httpConsentIsRememberedForTheSavedBaseAndClearedOnSignOut() throws Exception {
+        Settings settings = new Settings(preferences);
+        settings.save("http://example.com:5155/player", "test-token", true, false, true);
+        assertTrue(settings.current().allowInsecureHttp);
+        assertEquals("http://example.com:5155/player/", settings.current().server);
+        assertTrue(new Settings(preferences).current().allowInsecureHttp);
+        settings.signOut();
+        assertFalse(settings.current().allowInsecureHttp);
+        assertFalse(new Settings(preferences).current().allowInsecureHttp);
+        settings.save(SERVER, "", false, false);
+        assertFalse(settings.current().allowInsecureHttp);
+    }
+
+    @Test public void persistedHttpWithoutConsentCannotAuthorizeNetworkOrOfflineAccess() {
+        preferences.edit().putString("server", "http://example.com/")
+                .putBoolean("offlineAuthorized", true).commit();
+        Settings.Snapshot account = new Settings(preferences).current();
+        assertFalse(account.configured);
+        assertFalse(account.offlineAuthorized);
     }
 }

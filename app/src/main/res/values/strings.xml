@@ -21,6 +21,9 @@
     <string name="cancel">Cancel</string>
     <string name="logout">Sign out</string>
     <string name="server">AZify Server URL</string>
+    <string name="allow_insecure_http">Allow insecure HTTP</string>
+    <string name="insecure_http_warning">HTTP is not encrypted. Your password credential and music could be intercepted. Use only on trusted networks.</string>
+    <string name="insecure_http_not_allowed">Enable Allow insecure HTTP to continue, or use HTTPS.</string>
     <string name="password">Password</string>
     <string name="password_saved">Password (leave empty to keep current)</string>
     <string name="remember_password">Remember Password</string>

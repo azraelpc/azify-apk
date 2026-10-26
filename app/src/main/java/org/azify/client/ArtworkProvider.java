@@ -48,13 +48,7 @@ public final class ArtworkProvider extends ContentProvider {
             throw new FileNotFoundException("Artwork is not available");
         }
         HttpUrl source = HttpUrl.parse(Objects.toString(uri.getQueryParameter("source"), ""));
-        HttpUrl server = HttpUrl.get(account.server);
-        if (source == null || !source.isHttps()
-                || !source.host().equals(server.host()) || source.port() != server.port()
-                || !source.username().isEmpty() || !source.password().isEmpty()
-                || source.query() != null || source.fragment() != null
-                || !(source.encodedPath().startsWith("/music/")
-                || source.encodedPath().equals("/nocover.jpg"))) {
+        if (source == null || !AzifyClient.isArtworkUrl(account.server, source.toString())) {
             throw new FileNotFoundException("Artwork is not available");
         }
         try {

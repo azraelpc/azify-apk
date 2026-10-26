@@ -14,6 +14,7 @@ import androidx.media3.exoplayer.offline.Download;
 import androidx.media3.exoplayer.offline.DownloadRequest;
 
 import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
@@ -33,6 +34,12 @@ import static org.junit.Assert.*;
 @Config(sdk = 28)
 public class DownloadsTest {
     private Downloads downloads;
+
+    @Before public void resetSettingsSingleton() throws Exception {
+        Field singleton = Settings.class.getDeclaredField("instance");
+        singleton.setAccessible(true);
+        singleton.set(null, null);
+    }
 
     private Object field(Object owner, String name) throws Exception {
         Field field = owner.getClass().getDeclaredField(name);

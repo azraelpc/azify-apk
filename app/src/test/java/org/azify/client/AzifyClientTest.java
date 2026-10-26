@@ -121,14 +121,59 @@ public class AzifyClientTest {
                 AzifyClient.passwordHash(" abc "));
     }
 
-    @Test public void serverMustBeHttpsWithoutEmbeddedSecretsOrPaths() {
+    @Test public void serverAcceptsHttpPathsAndPortsButRejectsEmbeddedSecrets() {
         assertEquals("https://example.com/", AzifyClient.normalizeServer(" https://example.com "));
-        for (String invalid : new String[] {"", "   ", "http://example.com", "https://user:secret@example.com",
-                "https://example.com/path", "https://example.com/?password=x"}) {
+        assertEquals("http://example.com:5155/player/", AzifyClient.normalizeServer("http://example.com:5155/player"));
+        assertEquals("https://example.com:8443/a/b/", AzifyClient.normalizeServer("https://example.com:8443/a/b/"));
+        assertEquals("http://[::1]:5155/player/", AzifyClient.normalizeServer("http://[::1]:5155/player"));
+        for (String invalid : new String[] {"", "   ", "ftp://example.com", "https://user:secret@example.com",
+                "https://example.com/?password=x", "https://example.com/player/#fragment"}) {
             try {
                 AzifyClient.normalizeServer(invalid);
                 fail("Expected invalid server URL");
             } catch (IllegalArgumentException expected) {
+                assertNotNull(expected);
+            }
+        }
+    }
+
+    @Test public void apiAndMediaKeepTheConfiguredBasePathAndPort() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.enqueue(new MockResponse().setBody("[{\"album\":\"Disc\",\"folder\":\"Disc\","
+                    + "\"tracks\":[{\"title\":\"song.mp3\",\"file\":\"/music/Disc/song.mp3\"}]}]"));
+            String base = server.url("/player/nested/").toString();
+            Catalog catalog = new AzifyClient().fetch(base, "test-token");
+            assertEquals("/player/nested/api/music", server.takeRequest().getPath());
+            assertEquals(base + "music/Disc/song.mp3", catalog.tracks().get(0).url);
+            assertEquals(base + "nocover.jpg", catalog.tracks().get(0).artwork);
+        }
+    }
+
+    @Test public void artworkUsesTheConfiguredSchemePortAndSubpath() {
+        String base = "http://example.com:5155/player/";
+        assertTrue(AzifyClient.isArtworkUrl(base, base + "music/Album/cover.jpg"));
+        assertTrue(AzifyClient.isArtworkUrl(base, base + "nocover.jpg"));
+        assertFalse(AzifyClient.isArtworkUrl(base, "http://example.com:5155/music/cover.jpg"));
+        assertFalse(AzifyClient.isArtworkUrl(base, "http://example.com:5155/player-other/music/cover.jpg"));
+        assertFalse(AzifyClient.isArtworkUrl(base, base + "api/music"));
+        assertFalse(AzifyClient.isArtworkUrl(base, base + "music/cover.jpg?token=secret"));
+        assertFalse(AzifyClient.isArtworkUrl(base, "https://example.com:5155/player/music/cover.jpg"));
+    }
+
+    @Test public void httpCredentialsStayWithinTheExactSchemePortAndBasePath() throws Exception {
+        String base = "http://example.com:5155/player/";
+        assertEquals("test-token", AzifyClient.mediaHeaders(base, "test-token",
+                base + "music/song.mp3").get("X-Azify-Pass"));
+        for (String invalid : new String[] {"http://example.com:5155/music/song.mp3",
+                "http://example.com:5155/player-other/music/song.mp3",
+            "http://example.com:5155/player/another-app/music/song.mp3",
+                "https://example.com:5155/player/music/song.mp3",
+                "http://example.com:5156/player/music/song.mp3",
+                "http://example.com:5155/player/../music/song.mp3"}) {
+            try {
+                AzifyClient.mediaHeaders(base, "test-token", invalid);
+                fail("Expected a different base URL to be rejected");
+            } catch (IOException expected) {
                 assertNotNull(expected);
             }
         }

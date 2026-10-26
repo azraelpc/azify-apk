@@ -45,6 +45,11 @@ public class CatalogTest {
                 Catalog.mediaUrl(SERVER, "/music/\u00f1.mp3"));
     }
 
+    @Test public void encodedBasePathsArePreservedWithoutDoubleEncoding() {
+        assertEquals("https://example.com:8443/my%20player/music/Disc/01%20%23%20%25.mp3",
+                Catalog.mediaUrl("https://example.com:8443/my%20player/", "/music/Disc/01 %23 %.mp3"));
+    }
+
     @Test(expected = IllegalArgumentException.class)
     public void rejectsExternalMediaUrls() {
         Catalog.mediaUrl(SERVER, "https://other.example/song.mp3");
