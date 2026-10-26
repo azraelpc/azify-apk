@@ -1,0 +1,24 @@
+<resources>
+    <style name="Theme.Azify" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="colorPrimary">#181818</item>
+        <item name="colorPrimaryDark">#121212</item>
+        <item name="colorAccent">#1DB954</item>
+        <item name="android:windowBackground">#121212</item>
+        <item name="android:colorBackground">#121212</item>
+        <item name="android:textColorPrimary">#F5F5F5</item>
+        <item name="android:textColorSecondary">#ABABAB</item>
+        <item name="android:statusBarColor">#121212</item>
+        <item name="android:navigationBarColor">#181818</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+    <style name="Azify.TransportButton" parent="Widget.AppCompat.ImageButton">
+        <item name="android:layout_width">40dp</item>
+        <item name="android:layout_height">48dp</item>
+        <item name="android:background">?attr/selectableItemBackgroundBorderless</item>
+        <item name="android:padding">8dp</item>
+        <item name="tint">#EEEEEE</item>
+        <item name="android:scaleType">fitCenter</item>
+    </style>
+</resources>

@@ -1,0 +1,23 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="76dp"
+    android:paddingHorizontal="8dp" android:paddingVertical="10dp" android:gravity="center_vertical"
+    android:orientation="horizontal" android:descendantFocusability="blocksDescendants">
+    <ImageView android:id="@+id/art" android:layout_width="52dp" android:layout_height="52dp"
+        android:src="@drawable/ic_azify" android:scaleType="centerCrop" android:importantForAccessibility="no" />
+    <LinearLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+        android:orientation="vertical" android:gravity="center_vertical" android:layout_marginStart="12dp">
+        <TextView android:id="@+id/title" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:textSize="15sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end" />
+        <TextView android:id="@+id/subtitle" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:textSize="12sp" android:textColor="#ABABAB" android:maxLines="1" android:ellipsize="end" />
+    </LinearLayout>
+    <ImageButton android:id="@+id/row_download" android:layout_width="48dp" android:layout_height="48dp"
+        android:background="?attr/selectableItemBackgroundBorderless" app:tint="#BDBDBD"
+        android:src="@android:drawable/stat_sys_download" android:contentDescription="@string/download_actions"
+        android:tooltipText="@string/download_actions" android:focusable="false" />
+    <ImageButton android:id="@+id/row_play" android:layout_width="48dp" android:layout_height="48dp"
+        android:background="?attr/selectableItemBackgroundBorderless" app:tint="#1DB954"
+        android:src="@android:drawable/ic_media_play" android:contentDescription="@string/play_album"
+        android:tooltipText="@string/play_album" android:focusable="false" />
+</LinearLayout>

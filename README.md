@@ -1,139 +1,164 @@
-# AZify para Android
+# AZify for Android
 
-Cliente nativo generico para servidores [Azify](https://github.com/azraelpc/azify).
-Android 8.0 o superior. No contiene servidores, cuentas ni credenciales
-preconfigurados y no requiere modificar el servidor.
+A generic native Android client for [Azify](https://github.com/azraelpc/azify),
+including Android Auto media browsing and persistent offline downloads.
+Requires Android 8.0 or later. The interface and documentation are in English.
+No server, account, password or personal library is included in the APK.
 
-## Usar la app
+## Connect
 
-El APK de desarrollo se genera en
-[app/build/outputs/apk/debug/app-debug.apk](app/build/outputs/apk/debug/app-debug.apk).
-Instalarlo en el telefono y abrir AZify. El campo **AZify Server URL** esta vacio
-por defecto. Introducir la URL de un servidor propio, por ejemplo
-`https://example.com/`, y pulsar Conectar. Se consulta primero `/api/music` sin
-credenciales: si es publico, se entra directamente; solo una respuesta HTTP 401
-abre el campo de contrasena. Las respuestas 403, los fallos de red y un catalogo
-no valido no se confunden con una peticion de contrasena.
+Open AZify, enter your **AZify Server URL**, and select **Connect**. The URL is
+empty on a fresh installation. Use an HTTPS origin such as `https://example.com/`,
+without a subpath or query parameters. A local HTTP server needs an HTTPS reverse
+proxy or tunnel. No server changes are required.
 
-**Guardar contrasena** viene desmarcado. Sin marcarlo, el acceso solo se mantiene
-en memoria mientras siga vivo el proceso de la app, incluyendo la reproduccion
-en segundo plano y Android Auto. Cuando Android cierre ese proceso, habra que
-autenticarse de nuevo. Si se marca, el hash se guarda cifrado con Android Keystore.
-La URL se recuerda localmente; Cerrar sesion olvida tanto la URL como el acceso.
-Desmarcar la opcion y conectar elimina cualquier credencial guardada anteriormente.
+The app first requests `/api/music` without credentials. Public servers open
+directly; only HTTP 401 reveals the password field. Network errors, HTTP 403
+and invalid catalogs are not treated as password prompts.
 
-El servidor puede cambiarse desde Ajustes; solo se aceptan servidores HTTPS
-en la raiz del dominio, sin rutas adicionales. Un servidor HTTP local necesita
-un proxy o tunel HTTPS antes de poder utilizarse con este cliente.
+**Remember Password** is unchecked by default. When selected, the compatible
+SHA-256 credential is encrypted using Android Keystore and AES-GCM. Otherwise,
+it remains in process memory and must be entered again for online access after
+Android ends the process. Downloaded tracks remain available locally until
+you explicitly sign out.
 
-El identificador generico es `org.azify.client`. No actualiza ni hereda datos de
-versiones anteriores con otro identificador: se instala como una app independiente.
+**Sign out** appears only after password-protected access. It stops playback,
+pauses downloads, clears the password and offline authorization, then opens the
+login dialog. The last URL is remembered and the password must be entered again.
+Downloaded files remain on the device but cannot be played until signing in
+again to the same server. Public servers do not show Sign out.
 
-- Albums, carpetas anidadas, pistas y busqueda por titulo o carpeta.
-- Cola compartida entre telefono, Android Auto, auriculares y controles del sistema.
-- Reproducir/pausar, anterior/siguiente, seek, saltos de 10 segundos, shuffle y repetir.
-- Continuidad entre albums y reanudacion de la ultima pista y posicion guardadas.
-- Streaming en segundo plano, audio focus, pausa al desconectar auriculares y caratulas protegidas.
+## Browse And Play
 
-Es una interfaz Android nativa, no un WebView: no reproduce el portal 3D, el
-visualizador ni el compresor Web Audio de la web. Necesita conexion a Internet;
-no incluye descargas ni reproduccion offline. Los formatos dependen de los
-decodificadores disponibles en Android/Media3 y del contenido servido.
+- Albums, nested folders, tracks, search, and a shared playback queue.
+- Play/pause, previous/next, seeking, ten-second skips, shuffle and repeat.
+- Background playback, audio focus and pause when headphones are disconnected.
+- Phone, notification, headset and Android Auto controls use one Media3 session.
+- The last track and playback position are saved for playback resumption.
+
+This is a native client, not a WebView. The web portal animation, visualizer and
+Web Audio compressor are not reproduced. Audio format support depends on the
+Android/Media3 decoders and the media served by Azify.
+
+## Downloads
+
+Use the download icon beside an album, folder or track to download it. Progress,
+queued, paused, failed and downloaded states appear in the track list. The menu
+also offers retry, cancellation and removal. Allow notifications to see background
+download progress. Downloads use the current network, including mobile data.
+
+**Downloads** lists requested tracks, including those still in progress. Completed
+tracks are stored persistently in the app's private files, not temporary OS cache.
+Playback always reads local cached bytes first, even when online. Without a
+connection, the saved catalog exposes completed tracks and their folders. Playing
+from Downloads uses a queue containing completed downloads only.
+
+Partial downloads are resumed by Media3. Pending downloads can be resumed by
+selecting Download again; if an unsaved password was lost when Android killed
+the process, sign in before retrying. Android battery restrictions and foreground
+service time limits can interrupt long-running downloads.
+
+Storage is not automatically evicted. Remove downloads to reclaim space.
+Uninstalling or clearing app data deletes them. Downloads and catalogs are kept
+separate by server origin and are never copied into a build artifact.
 
 ## Android Auto
 
-El servicio `MediaLibraryService` publica Albums, Carpetas y Reproducir todo.
-Soporta busqueda, seleccion de pistas, cola, play/pause, next/previous y seek
-mediante MediaSession. El coche decide que controles mostrar y puede limitar
-la navegacion y el seek mientras se conduce. No se muestra la pagina web en el coche.
+The MediaLibraryService exposes Albums, Folders, Play all and Downloads. It
+supports media selection, search, queue, play/pause, previous/next and seek through
+MediaSession. The car decides which controls are visible and may restrict browsing
+or seeking while driving. The website itself is not displayed in the car.
 
-Para probar este APK instalado fuera de Google Play:
+For a development APK installed outside Google Play:
 
-1. Abrir AZify e iniciar sesion en el telefono antes de conectar el coche.
-2. En Ajustes de Android Auto, pulsar repetidamente en la version para activar
-   sus opciones de desarrollador (normalmente 10 veces).
-3. Desde el menu de desarrollador de **Android Auto**, activar **Fuentes
-   desconocidas / Unknown sources**. No es el permiso general de instalar APK.
-4. Reconectar el telefono al coche y buscar AZify en el selector de musica o en
-   Personalizar lanzador.
+1. Open AZify and connect on the phone before connecting to the car.
+2. Open Android Auto settings and tap the version repeatedly, usually ten times,
+   to enable its developer settings.
+3. Enable **Unknown sources** in the **Android Auto developer menu**. This is not
+   Android's general permission to install APKs.
+4. Reconnect and look for AZify in the media selector or Customize launcher.
 
-La admision de apps instaladas por ADB puede variar segun Android Auto y el
-fabricante. Si no aparece, la alternativa oficial es distribuir mediante una
-pista de prueba interna de Google Play. El APK debug no implica aprobacion de
-Google Play ni garantiza admision por todos los coches. La publicacion requiere
-firma propia y cumplir las politicas de apps multimedia para coches.
+Sideloaded-app visibility depends on Android Auto and the device manufacturer.
+An official alternative is distribution through a Google Play internal testing
+track. A debug APK is not Google Play approval or a guarantee of support by every
+head unit. Publishing requires your own signing key and compliance with car-app
+quality requirements. Protocol tests do not replace testing in a car or Desktop
+Head Unit.
 
-## Crear el APK
+## Build
 
-En Windows, sin Java/SDK preinstalados:
+On Windows without a preinstalled JDK or Android SDK:
 
 ```powershell
 .\scripts\build.ps1 -AcceptSdkLicenses
 ```
 
-El parametro acepta las licencias del SDK de Google; revisar primero
-<https://developer.android.com/studio/terms>. Las herramientas se descargan
-dentro de `.tools/`, sin instalacion global. En siguientes builds basta con
-`.\scripts\build.ps1`. Ejecuta 35 pruebas locales, Android Lint y assembleDebug.
-Las pruebas usan servidores simulados y dominios de ejemplo, nunca datos personales.
+Review <https://developer.android.com/studio/terms> before accepting. Tools are
+downloaded into `.tools/` without a global installation. Subsequent builds use:
 
-Con JDK 17 y Android SDK 35 ya configurados, o desde Android Studio:
+```powershell
+.\scripts\build.ps1
+```
+
+This runs local tests, Android Lint and assembleDebug. With JDK 17 and SDK 35
+already configured, the standard Gradle wrapper or Android Studio also works:
 
 ```powershell
 .\gradlew.bat testDebugUnitTest lintDebug assembleDebug
 ```
 
-Abrir esta carpeta como proyecto Gradle en Android Studio. VS Code puede editar
-el codigo y ejecutar los scripts; su analizador Java generico puede no importar
-automaticamente el classpath de Android. Gradle es la referencia para compilar.
-Las dependencias estan fijadas y el wrapper verifica el SHA-256 de Gradle 8.11.1.
-El build release necesita una clave de firma propia; no publicar con la clave debug.
+After a successful build that includes **assembleDebug**, the APK is copied to
+**`APK/Azify-DDMMYY.apk`**, for example `APK/Azify-261026.apk`. Successful builds
+on the same day replace that day's file; builds from previous dates remain.
+Failed builds never replace the published copy. `APK/` is deliberately not
+gitignored, so these files can be committed to GitHub. No automatic git commit
+or push is performed. The original output remains at
+`app/build/outputs/apk/debug/app-debug.apk`.
 
-## Pruebas en telefono
+The Gradle wrapper checks the official Gradle 8.11.1 SHA-256. Open this folder in
+Android Studio as a Gradle project; VS Code's generic Java analyzer might not
+automatically import the Android classpath. Gradle is the build reference.
+Release distribution requires a private signing key, not the debug key.
 
-Activar depuracion USB y autorizar el PC. Preparar los APK sin borrar datos:
+## Device Tests
+
+Enable USB debugging, authorize the computer and keep the phone unlocked:
 
 ```powershell
 .\scripts\test-device.ps1 -InstallPackages
 ```
 
-Aceptar ambas instalaciones en el telefono. Abrir AZify e iniciar sesion. Luego:
+Approve both APK installations. Open AZify, configure your server and connect.
+Then run the non-destructive instrumentation script:
 
 ```powershell
 .\scripts\test-device.ps1
 ```
 
-Las tres pruebas comprueban biblioteca, carpetas, busqueda, caratulas autenticadas,
-streaming, pausa, seek, siguiente y anterior, con clientes Media3 y
-MediaBrowserCompat (protocolo de compatibilidad usado por Android Auto).
-Requieren una biblioteca con al menos un album reproducible; silencian el audio
-de AZify durante la prueba y dejan la reproduccion pausada al terminar.
-`-Serial ID` permite elegir un dispositivo.
+The live tests cover library/folder browsing, search, authenticated artwork,
+streaming, pause, seek, next/previous, portrait/landscape controls and the Media3
+and legacy MediaBrowserCompat protocols. They require a nonempty playable library,
+mute AZify during playback checks and leave it paused. Use `-Serial ID` to select
+a device. Local tests also verify cache-first playback without network access,
+credential privacy, catalog filtering and Sign out.
 
-Evitar `connectedDebugAndroidTest` sobre una instalacion personal con datos:
-el ejecutor de Gradle puede desinstalar la app al limpiar una sesion fallida.
-El script anterior no desinstala paquetes. Las pruebas del protocolo no sustituyen
-una prueba de la interfaz en el coche o con Desktop Head Unit.
+Avoid `connectedDebugAndroidTest` against an installation containing personal
+data: Gradle cleanup can uninstall the app after a failed test session. The
+provided script does not uninstall packages.
 
-## Datos y seguridad
+## Security And Sharing
 
-La clave se convierte al mismo SHA-256 usado por el servidor Azify. Ese hash
-equivale a una credencial de acceso: solo se guarda si el usuario elige Guardar
-contrasena, cifrado con AES-GCM y Android Keystore. Si no, permanece exclusivamente
-en memoria. Nunca forma parte del APK, las URL ni los logs. Se excluyen los datos
-de backups y transferencias. El acceso guardado desaparece al cerrar sesion o desinstalar.
-Si la clave cambia en el servidor, introducirla de nuevo en Ajustes.
+The generic package is `org.azify.client`. It does not inherit data from older
+personalized app identifiers. HTTPS, same-origin checks and disabled redirects
+prevent credentials being sent to a different server. Credentials are sent only
+through `X-Azify-Pass`, never in URLs. Trusted media controllers receive artwork
+through a read-only ContentProvider. Only AZify can change connection settings.
 
-API, audio e imagenes usan HTTPS y, solo si es necesario, `X-Azify-Pass`.
-Se rechazan redirecciones y recursos de otros origenes para no reenviar
-la credencial a otro servidor. Las caratulas llegan a los clientes
-multimedia autorizados mediante un ContentProvider de solo lectura.
-El servicio acepta la propia app y controladores multimedia de confianza del
-sistema; las operaciones de cambiar acceso y recargar solo se aceptan desde AZify.
-El catalogo se mantiene en memoria un minuto; Actualizar fuerza su recarga.
+Credentials, downloads and library snapshots are private runtime data and are
+excluded from backups and device transfers. They are not part of source or APKs.
+Do not commit `.tools/`, `.gradle/`, `build/`, `local.properties`, personal signing
+keys, phone screenshots or test captures. These paths are local tooling or data;
+the generated distributable in `APK/` is safe to share after review.
 
-Para compartir el proyecto, no incluir `.tools/`, `.gradle/`, los directorios
-`build/`, `local.properties` ni claves de firma propias. Estan excluidos en
-`.gitignore`; son herramientas, caches, informes o datos locales, no fuentes.
-El enlace al repositorio publico de Azify documenta el protocolo compatible;
-no es un servidor predeterminado ni una cuenta incluida en el cliente.
+The upstream GitHub link identifies the compatible server project. It is not a
+preconfigured server or bundled account.

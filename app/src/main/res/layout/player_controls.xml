@@ -1,0 +1,33 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:paddingHorizontal="8dp" android:paddingBottom="8dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="32dp"
+        android:orientation="horizontal" android:gravity="center_vertical">
+        <TextView android:id="@id/exo_position" android:layout_width="wrap_content" android:layout_height="match_parent"
+            android:minWidth="48dp" android:gravity="center" android:textSize="12sp"
+            android:textColor="#BDBDBD" android:fontFamily="monospace" />
+        <androidx.media3.ui.DefaultTimeBar android:id="@id/exo_progress"
+            android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+            app:played_color="#1DB954" app:scrubber_color="#1DB954" app:buffered_color="#777777"
+            app:unplayed_color="#404040" />
+        <TextView android:id="@id/exo_duration" android:layout_width="wrap_content" android:layout_height="match_parent"
+            android:minWidth="48dp" android:gravity="center" android:textSize="12sp"
+            android:textColor="#BDBDBD" android:fontFamily="monospace" />
+    </LinearLayout>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="56dp"
+        android:orientation="horizontal" android:gravity="center">
+        <ImageButton android:id="@id/exo_shuffle" style="@style/Azify.TransportButton" />
+        <ImageButton android:id="@id/exo_prev" style="@style/Azify.TransportButton"
+            android:src="@android:drawable/ic_media_previous" android:contentDescription="@string/exo_controls_previous_description" />
+        <ImageButton android:id="@id/exo_rew" style="@style/Azify.TransportButton"
+            android:src="@android:drawable/ic_media_rew" android:contentDescription="@string/exo_controls_rewind_description" />
+        <ImageButton android:id="@id/exo_play_pause" style="@style/Azify.TransportButton"
+            android:layout_width="56dp" android:layout_height="56dp" />
+        <ImageButton android:id="@id/exo_ffwd" style="@style/Azify.TransportButton"
+            android:src="@android:drawable/ic_media_ff" android:contentDescription="@string/exo_controls_fastforward_description" />
+        <ImageButton android:id="@id/exo_next" style="@style/Azify.TransportButton"
+            android:src="@android:drawable/ic_media_next" android:contentDescription="@string/exo_controls_next_description" />
+        <ImageButton android:id="@id/exo_repeat_toggle" style="@style/Azify.TransportButton" />
+    </LinearLayout>
+</LinearLayout>

@@ -1,0 +1,5 @@
+<resources>
+    <item name="server_url" type="id" />
+    <item name="server_password" type="id" />
+    <item name="remember_password" type="id" />
+</resources>
