@@ -64,7 +64,7 @@ final class Catalog {
         catalog.sourceJson = json;
         catalog.add(new Entry(ROOT, "AZify", "", Kind.ROOT, null, null, null));
         catalog.add(new Entry(ALBUMS, "Albums", "", Kind.FOLDER, null, null, null));
-        catalog.add(new Entry(FOLDERS, "Folders", "", Kind.FOLDER, null, null, null));
+        catalog.add(new Entry(FOLDERS, "Songs", "", Kind.FOLDER, null, null, null));
         catalog.add(new Entry(ALL, "Play all", "", Kind.ALL, null, null, null));
         catalog.add(new Entry(DOWNLOADS, "Downloads", "", Kind.FOLDER, null, null, null));
         catalog.children.get(ROOT).add(catalog.get(ALBUMS));

@@ -4,4 +4,7 @@
     <item name="remember_password" type="id" />
     <item name="allow_insecure_http" type="id" />
     <item name="connection_error" type="id" />
+    <item name="cache_size_slider" type="id" />
+    <item name="clear_cache_action" type="id" />
+    <item name="debug_downloads_action" type="id" />
 </resources>

@@ -15,6 +15,7 @@ import androidx.media3.common.C;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MediaMetadata;
 import androidx.media3.common.Player;
+import androidx.media3.common.Timeline;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.DataSourceBitmapLoader;
@@ -39,7 +40,9 @@ import com.google.common.util.concurrent.MoreExecutors;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.Executors;
 
 @UnstableApi
@@ -90,6 +93,12 @@ public final class PlaybackService extends MediaLibraryService {
         player.addListener(new Player.Listener() {
             @Override public void onEvents(Player current, Player.Events events) {
                 savePosition();
+                if (events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)
+                        || events.contains(Player.EVENT_TIMELINE_CHANGED)
+                        || events.contains(Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED)
+                        || events.contains(Player.EVENT_REPEAT_MODE_CHANGED)) {
+                    prefetchNextTracks(current, 3);
+                }
             }
         });
         Intent intent = new Intent(Intent.ACTION_MAIN)
@@ -167,6 +176,14 @@ public final class PlaybackService extends MediaLibraryService {
         return result;
     }
 
+    private List<MediaItem> itemsOffline(List<Catalog.Entry> entries) {
+        List<MediaItem> result = new ArrayList<>(entries.size());
+        for (Catalog.Entry entry : entries) {
+            result.add(item(entry).buildUpon().setMediaId(Catalog.OFFLINE + entry.id).build());
+        }
+        return result;
+    }
+
     private <T> ListenableFuture<LibraryResult<T>> library(LibraryWork<T> work) {
         return library(false, work);
     }
@@ -192,6 +209,30 @@ public final class PlaybackService extends MediaLibraryService {
 
     private interface LibraryWork<T> {
         LibraryResult<T> run(Catalog catalog);
+    }
+
+    private void prefetchNextTracks(Player current, int count) {
+        if (downloads == null || current.getMediaItemCount() == 0 || count < 1) {
+            return;
+        }
+        Timeline timeline = current.getCurrentTimeline();
+        int index = current.getCurrentMediaItemIndex();
+        if (index == C.INDEX_UNSET || timeline.isEmpty()) {
+            return;
+        }
+        List<String> urls = new ArrayList<>(count);
+        Set<Integer> seen = new HashSet<>();
+        for (int i = 0; i < count; i++) {
+            index = timeline.getNextWindowIndex(index, current.getRepeatMode(), current.getShuffleModeEnabled());
+            if (index == C.INDEX_UNSET || !seen.add(index)) {
+                break;
+            }
+            MediaItem candidate = current.getMediaItemAt(index);
+            if (candidate.localConfiguration != null && candidate.localConfiguration.uri != null) {
+                urls.add(candidate.localConfiguration.uri.toString());
+            }
+        }
+        downloads.prefetchUpcoming(urls);
     }
 
     private MediaSession.MediaItemsWithStartPosition queue(Catalog catalog, String id, long position) {
@@ -272,11 +313,19 @@ public final class PlaybackService extends MediaLibraryService {
                 int page, int pageSize, @Nullable LibraryParams params) {
             if (parentId.equals(Catalog.DOWNLOADS)) {
                 return library(true, catalog -> {
-                    List<MediaItem> local = new ArrayList<>();
-                    for (Catalog.Entry entry : Catalog.page(catalog.tracks(), page, pageSize)) {
-                        local.add(item(entry).buildUpon().setMediaId(Catalog.OFFLINE + entry.id).build());
+                    return LibraryResult.ofItemList(itemsOffline(
+                            Catalog.page(catalog.children(Catalog.ALBUMS), page, pageSize)), params);
+                });
+            }
+            if (parentId.startsWith(Catalog.OFFLINE)) {
+                return library(true, catalog -> {
+                    String localParent = parentId.substring(Catalog.OFFLINE.length());
+                    Catalog.Entry parent = catalog.get(localParent);
+                    if (parent == null || !parent.browsable()) {
+                        return LibraryResult.ofError(SessionError.ERROR_BAD_VALUE);
                     }
-                    return LibraryResult.ofItemList(local, params);
+                    return LibraryResult.ofItemList(itemsOffline(
+                            Catalog.page(catalog.children(localParent), page, pageSize)), params);
                 });
             }
             return library(catalog -> {
@@ -316,16 +365,27 @@ public final class PlaybackService extends MediaLibraryService {
                     return queue(downloads.library(true),
                             requested.get(0).mediaId.substring(Catalog.OFFLINE.length()), startPositionMs);
                 }
-                Catalog catalog = repository.get();
                 if (requested.isEmpty()) {
                     return new MediaSession.MediaItemsWithStartPosition(ImmutableList.of(), 0, 0);
                 }
+                Catalog catalog = repository.get();
                 if (requested.size() == 1) {
                     return queue(catalog, resolveId(catalog, requested.get(0)), startPositionMs);
                 }
+                boolean hasOffline = false;
+                for (MediaItem request : requested) {
+                    if (request.mediaId.startsWith(Catalog.OFFLINE)) {
+                        hasOffline = true;
+                        break;
+                    }
+                }
+                Catalog source = hasOffline ? downloads.library(true) : catalog;
                 List<MediaItem> resolved = new ArrayList<>();
                 for (MediaItem request : requested) {
-                    Catalog.Entry entry = catalog.get(resolveId(catalog, request));
+                    String id = request.mediaId.startsWith(Catalog.OFFLINE)
+                            ? request.mediaId.substring(Catalog.OFFLINE.length())
+                            : resolveId(source, request);
+                    Catalog.Entry entry = source.get(id);
                     if (entry == null || entry.kind != Catalog.Kind.TRACK) {
                         throw new IllegalArgumentException("Invalid track.");
                     }

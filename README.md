@@ -18,6 +18,9 @@ supported, for example:
 - `http://192.0.2.10:5155/`
 - `http://example.com:5155/apps/music/`
 
+A URL without scheme is also accepted. The app first tries `https://` and then
+`http://` if needed.
+
 A missing trailing slash is added automatically. Embedded credentials, query
 parameters and fragments are rejected. HTTPS is recommended. With an HTTP URL,
 the unchecked **Allow insecure HTTP** option and a warning appear. You must
@@ -50,6 +53,19 @@ login dialog. The last URL is remembered and the password must be entered again.
 Downloaded files remain on the device but cannot be played until signing in
 again to the same server. Public servers do not show Sign out.
 
+## Settings
+
+Use **Settings** from the top bar to adjust local behavior:
+
+- **Cache**: playback cache size (1-10 GB) and **Clear cache** action.
+- **Bandwidth usage**: downloaded bytes split by **Wi-Fi** and **Mobile data**
+   for **Today** and **Last 7 days**.
+- **Debug**: **Show downloaded MP3 list**, including merged source labels
+   (USER, CACHE, USER+CACHE).
+
+The Connect dialog is separate from Settings and is opened with **Connect** from
+the Settings dialog.
+
 ## Browse And Play
 
 - Albums, nested folders, tracks, search, and a shared playback queue.
@@ -65,13 +81,15 @@ Android/Media3 decoders and the media served by Azify.
 ## Downloads
 
 Use the download icon beside an album, folder or track to download it. Progress,
-queued, paused, failed and downloaded states appear in the track list. The menu
-also offers retry, cancellation and removal. Allow notifications to see background
-download progress. Downloads use the current network, including mobile data.
+queued, paused, failed and downloaded states appear in the track list. Tapping
+the icon lets you start, cancel or remove downloads directly depending on the
+current state. Allow notifications to see background download progress and
+completion alerts. Downloads use the current network, including mobile data.
 
 **Downloads** lists requested tracks, including those still in progress. Completed
 tracks are stored persistently in the app's private files, not temporary OS cache.
-Playback always reads local cached bytes first, even when online. Without a
+Playback always reads local cached bytes first, even when online. The player uses
+a dedicated playback cache (LRU) plus persistent manual downloads. Without a
 connection, the saved catalog exposes completed tracks and their folders. Playing
 from Downloads uses a queue containing completed downloads only.
 
@@ -79,6 +97,9 @@ Partial downloads are resumed by Media3. Pending downloads can be resumed by
 selecting Download again; if an unsaved password was lost when Android killed
 the process, sign in before retrying. Android battery restrictions and foreground
 service time limits can interrupt long-running downloads.
+
+When playback loses connectivity while streaming, the app shows a waiting state
+and automatically resumes once the connection returns.
 
 Storage is not automatically evicted. Remove downloads to reclaim space.
 Uninstalling or clearing app data deletes them. Downloads and catalogs are kept

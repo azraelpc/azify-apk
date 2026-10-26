@@ -31,12 +31,13 @@
             android:textColor="@color/tab_text" android:background="@drawable/tab_background" />
         <RadioButton android:id="@+id/tab_folders" style="@style/Widget.AppCompat.Button.Borderless"
             android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
-            android:button="@null" android:gravity="center" android:text="@string/folders"
+            android:button="@null" android:gravity="center" android:text="@string/songs"
             android:textColor="@color/tab_text" android:background="@drawable/tab_background" />
         <RadioButton android:id="@+id/tab_queue" style="@style/Widget.AppCompat.Button.Borderless"
             android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
             android:button="@null" android:gravity="center" android:text="@string/queue"
-            android:textColor="@color/tab_text" android:background="@drawable/tab_background" />
+            android:textColor="@color/tab_text" android:background="@drawable/tab_background"
+            android:visibility="gone" />
         <RadioButton android:id="@+id/tab_downloads" style="@style/Widget.AppCompat.Button.Borderless"
             android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
             android:button="@null" android:gravity="center" android:text="@string/downloads"
@@ -47,20 +48,6 @@
         android:layout_marginHorizontal="16dp" android:hint="@string/search" android:singleLine="true"
         android:inputType="text" android:imeOptions="actionSearch" android:autofillHints=""
         android:textSize="16sp" android:paddingHorizontal="8dp" />
-    <LinearLayout android:id="@+id/navigation" android:layout_width="match_parent" android:layout_height="52dp"
-        android:paddingStart="8dp" android:paddingEnd="8dp" android:gravity="center_vertical">
-        <ImageButton android:id="@+id/back" android:layout_width="48dp" android:layout_height="48dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            app:srcCompat="?attr/homeAsUpIndicator" app:tint="#E5E5E5"
-            android:contentDescription="@string/back" android:tooltipText="@string/back" />
-        <TextView android:id="@+id/breadcrumb" android:layout_width="0dp" android:layout_height="wrap_content"
-            android:layout_weight="1" android:text="@string/albums" android:textSize="14sp"
-            android:textStyle="bold" android:maxLines="2" android:ellipsize="start" />
-        <ImageButton android:id="@+id/play_all" android:layout_width="48dp" android:layout_height="48dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:src="@android:drawable/ic_media_play" app:tint="#1DB954"
-            android:contentDescription="@string/play_all" android:tooltipText="@string/play_all" />
-    </LinearLayout>
     <ProgressBar android:id="@+id/loading" style="?android:attr/progressBarStyleHorizontal"
         android:layout_width="match_parent" android:layout_height="3dp" android:indeterminate="true"
         android:visibility="invisible" />

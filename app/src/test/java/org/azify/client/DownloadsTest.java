@@ -51,7 +51,8 @@ public class DownloadsTest {
         if (downloads != null) {
             downloads.manager().release();
             ((ExecutorService) field(downloads, "disk")).shutdownNow();
-            ((SimpleCache) field(downloads, "cache")).release();
+            ((SimpleCache) field(downloads, "downloadCache")).release();
+            ((SimpleCache) field(downloads, "playbackCache")).release();
             Field singleton = Downloads.class.getDeclaredField("instance");
             singleton.setAccessible(true);
             singleton.set(null, null);
@@ -70,7 +71,7 @@ public class DownloadsTest {
         String source = server + "music/song.wav";
         settings.save(server, "temporary-test-token", true, false);
         downloads = Downloads.get(context);
-        SimpleCache cache = (SimpleCache) field(downloads, "cache");
+        SimpleCache cache = (SimpleCache) field(downloads, "downloadCache");
         byte[] audio = new byte[] {82, 73, 70, 70, 12, 34, 56, 78};
         CacheDataSink sink = new CacheDataSink(cache, CacheDataSink.DEFAULT_FRAGMENT_SIZE);
         androidx.media3.datasource.cache.CacheSpan lockedSpan = cache.startReadWrite(source, 0, audio.length);

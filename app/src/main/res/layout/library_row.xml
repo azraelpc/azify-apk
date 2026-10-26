@@ -16,8 +16,4 @@
         android:background="?attr/selectableItemBackgroundBorderless" app:tint="#BDBDBD"
         android:src="@android:drawable/stat_sys_download" android:contentDescription="@string/download_actions"
         android:tooltipText="@string/download_actions" android:focusable="false" />
-    <ImageButton android:id="@+id/row_play" android:layout_width="48dp" android:layout_height="48dp"
-        android:background="?attr/selectableItemBackgroundBorderless" app:tint="#1DB954"
-        android:src="@android:drawable/ic_media_play" android:contentDescription="@string/play_album"
-        android:tooltipText="@string/play_album" android:focusable="false" />
 </LinearLayout>

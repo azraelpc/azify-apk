@@ -7,7 +7,7 @@
     <string name="settings">Settings</string>
     <string name="refresh">Refresh library</string>
     <string name="albums">Albums</string>
-    <string name="folders">Folders</string>
+    <string name="songs">Songs</string>
     <string name="queue">Queue</string>
     <string name="search">Search albums and tracks</string>
     <string name="back">Back</string>
@@ -16,6 +16,7 @@
     <string name="nothing_playing">Nothing playing</string>
     <string name="empty">No items found.</string>
     <string name="offline">Cannot connect. Check your connection and refresh the library.</string>
+    <string name="server_not_found">Server not found. Check the server URL and try again.</string>
     <string name="auth_error">Access denied. Check your password in Settings.</string>
     <string name="connect">Connect</string>
     <string name="cancel">Cancel</string>
@@ -27,10 +28,26 @@
     <string name="password">Password</string>
     <string name="password_saved">Password (leave empty to keep current)</string>
     <string name="remember_password">Remember Password</string>
+    <string name="cache_section">Cache</string>
+    <string name="cache_size_value">Cache size: %1$d GB</string>
+    <string name="clear_cache">Clear cache</string>
+    <string name="clear_cache_confirm">Are you sure to clear cache?</string>
+    <string name="cache_cleared">Cache cleared</string>
+    <string name="cache_clear_failed">Cannot clear cache right now.</string>
+    <string name="bandwidth_section">Bandwidth usage</string>
+    <string name="bandwidth_wifi">Wi-Fi</string>
+    <string name="bandwidth_mobile">Mobile data</string>
+    <string name="bandwidth_today">Today: %1$s</string>
+    <string name="bandwidth_week">Last 7 days: %1$s</string>
+    <string name="debug_section">Debug</string>
+    <string name="debug_show_downloaded_mp3">Show downloaded MP3 list</string>
+    <string name="debug_downloaded_mp3_title">Downloaded MP3 files</string>
+    <string name="debug_no_downloaded_mp3">No downloaded MP3 files.</string>
     <string name="password_required">This server requires a password.</string>
     <string name="connecting">Checking access\u2026</string>
     <string name="connection_title">Connect to AZify</string>
     <string name="playback_error">Cannot play this track. Check access and your connection.</string>
+    <string name="playback_waiting_connection">No internet connection. Waiting to reconnect to resume playback.</string>
     <string name="connect_failed">Cannot start the media session.</string>
     <string name="download">Download</string>
     <string name="downloaded">Downloaded</string>
@@ -44,4 +61,7 @@
     <string name="cancel_download">Cancel download</string>
     <string name="offline_mode">Offline</string>
     <string name="download_actions">Download options</string>
+    <string name="download_finished">Descarga finalizada</string>
+    <string name="cancel_download_collection_question">Cancel this download and remove downloaded files from this album/folder?</string>
+    <string name="remove_download_collection_question">Remove downloaded files from this album/folder?</string>
 </resources>

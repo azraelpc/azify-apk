@@ -4,6 +4,7 @@ import android.app.SearchManager;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.graphics.Bitmap;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
@@ -12,11 +13,15 @@ import android.os.Looper;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
+import android.text.format.Formatter;
 import android.util.LruCache;
 import android.view.LayoutInflater;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
+import android.view.animation.LinearInterpolator;
+import android.view.animation.RotateAnimation;
 import android.widget.BaseAdapter;
 import android.widget.CheckBox;
 import android.widget.EditText;
@@ -27,7 +32,9 @@ import android.widget.ListView;
 import android.widget.RadioGroup;
 import android.widget.PopupMenu;
 import android.widget.ScrollView;
+import android.widget.SeekBar;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.activity.OnBackPressedCallback;
 import androidx.annotation.NonNull;
@@ -64,11 +71,13 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.io.IOException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
 @UnstableApi
 public final class MainActivity extends AppCompatActivity {
+    private static final String MASKED_PASSWORD = "********";
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Executor ui = command -> main.post(command);
     private final ListeningExecutorService workers =
@@ -76,6 +85,7 @@ public final class MainActivity extends AppCompatActivity {
     private final List<MediaItem> rows = new ArrayList<>();
     private final ArrayList<String> history = new ArrayList<>();
     private final Map<String, ListenableFuture<Bitmap>> pendingImages = new HashMap<>();
+    private final Map<String, Integer> collectionStates = new HashMap<>();
     private final LruCache<String, Bitmap> images = new LruCache<>(12 * 1024 * 1024) {
         @Override protected int sizeOf(@NonNull String key, @NonNull Bitmap value) {
             return value.getAllocationByteCount();
@@ -86,19 +96,22 @@ public final class MainActivity extends AppCompatActivity {
     private DataSourceBitmapLoader imageLoader;
     private LibraryAdapter adapter;
     private TextView status;
-    private TextView breadcrumb;
     private EditText search;
     private PlayerControlView controls;
     private String parent = Catalog.ALBUMS;
     private boolean queueView;
     private int requestVersion;
     private AlertDialog loginDialog;
+    private AlertDialog settingsDialog;
     private boolean loginOffered;
+    private Boolean onlineState;
+    private boolean waitForConnectivity;
     private Downloads downloads;
     private final Runnable searchLater = this::load;
     private final Runnable downloadChanged = () -> {
         if (browser != null) {
-            if (parent.equals(Catalog.DOWNLOADS)) { load(); }
+            if (parent.equals(Catalog.DOWNLOADS) || parent.startsWith(Catalog.OFFLINE)) { load(); }
+            refreshCollectionStates();
             adapter.notifyDataSetChanged();
             offerLogin();
         }
@@ -107,6 +120,28 @@ public final class MainActivity extends AppCompatActivity {
         @Override public void run() {
             if (adapter != null) { adapter.notifyDataSetChanged(); }
             main.postDelayed(this, 1_000);
+        }
+    };
+    private final Runnable connectivityWatch = new Runnable() {
+        @Override public void run() {
+            if (downloads == null) {
+                main.postDelayed(this, 3_000);
+                return;
+            }
+            boolean online = downloads.online();
+            if (onlineState == null || onlineState != online) {
+                onlineState = online;
+                if (browser != null) {
+                    refresh(false);
+                }
+            }
+            if (online && waitForConnectivity && browser != null) {
+                waitForConnectivity = false;
+                showStatus(null);
+                browser.prepare();
+                browser.play();
+            }
+            main.postDelayed(this, 3_000);
         }
     };
 
@@ -122,7 +157,6 @@ public final class MainActivity extends AppCompatActivity {
         });
         imageLoader = new DataSourceBitmapLoader(workers, new DefaultDataSource.Factory(this), null, 320);
         status = findViewById(R.id.status);
-        breadcrumb = findViewById(R.id.breadcrumb);
         search = findViewById(R.id.search);
         controls = findViewById(R.id.controls);
         controls.setShowTimeoutMs(0);
@@ -138,21 +172,26 @@ public final class MainActivity extends AppCompatActivity {
                     browser.play();
                 }
             } else if (Boolean.TRUE.equals(selected.mediaMetadata.isBrowsable)) {
-                history.add(parent);
-                parent = selected.mediaId;
-                search.setText("");
-                load();
+                if (Catalog.ALBUMS.equals(parent) && Boolean.TRUE.equals(selected.mediaMetadata.isPlayable)) {
+                    play(selected.mediaId);
+                } else {
+                    history.add(parent);
+                    parent = selected.mediaId;
+                    search.setText("");
+                    load();
+                }
             } else {
-                play(selected.mediaId);
+                if (isFolderTrackView()) {
+                    playInVisibleOrder(selected.mediaId);
+                } else {
+                    play(selected.mediaId);
+                }
             }
         });
-        findViewById(R.id.settings).setOnClickListener(view -> showLogin());
+        findViewById(R.id.settings).setOnClickListener(view -> showSettings());
         findViewById(R.id.sign_out).setOnClickListener(view -> signOut());
         updateSessionUi();
         findViewById(R.id.refresh).setOnClickListener(view -> refresh(false));
-        findViewById(R.id.play_all).setOnClickListener(view ->
-            play(parent.equals(Catalog.DOWNLOADS) ? Catalog.OFFLINE + Catalog.ALL : Catalog.ALL));
-        findViewById(R.id.back).setOnClickListener(view -> goBack());
         RadioGroup tabs = findViewById(R.id.tabs);
         tabs.setOnCheckedChangeListener((group, checked) -> {
             queueView = checked == R.id.tab_queue;
@@ -192,6 +231,7 @@ public final class MainActivity extends AppCompatActivity {
             }
             search.setText(state.getString("query", ""));
         }
+        applyQueueTabVisibility();
     }
 
     private void configureCompactLandscape() {
@@ -201,14 +241,6 @@ public final class MainActivity extends AppCompatActivity {
             return;
         }
         LinearLayout root = findViewById(R.id.root);
-        LinearLayout header = findViewById(R.id.header);
-        LinearLayout navigation = findViewById(R.id.navigation);
-        for (int id : new int[] {R.id.refresh, R.id.settings, R.id.sign_out}) {
-            View button = findViewById(id);
-            header.removeView(button);
-            navigation.addView(button, navigation.getChildCount() - 1);
-        }
-        header.setVisibility(View.GONE);
         View tabs = findViewById(R.id.tabs);
         View input = findViewById(R.id.search);
         root.removeView(tabs);
@@ -221,11 +253,55 @@ public final class MainActivity extends AppCompatActivity {
                 (int) (48 * getResources().getDisplayMetrics().density)));
     }
 
+    private void applyQueueTabVisibility() {
+        View queueTab = findViewById(R.id.tab_queue);
+        if (queueTab == null) {
+            return;
+        }
+        boolean enabled = Settings.get(this).current().queueEnabled;
+        queueTab.setVisibility(enabled ? View.VISIBLE : View.GONE);
+        RadioGroup tabs = findViewById(R.id.tabs);
+        if (!enabled && tabs.getCheckedRadioButtonId() == R.id.tab_queue) {
+            tabs.check(R.id.tab_albums);
+            queueView = false;
+            parent = Catalog.ALBUMS;
+        }
+    }
+
+    private boolean isFolderTrackView() {
+        return parent.startsWith(Catalog.FOLDERS) || parent.startsWith(Catalog.OFFLINE + Catalog.FOLDERS);
+    }
+
+    private void playInVisibleOrder(String selectedId) {
+        if (browser == null) {
+            return;
+        }
+        ArrayList<MediaItem> queue = new ArrayList<>();
+        int start = 0;
+        for (MediaItem row : rows) {
+            if (Boolean.TRUE.equals(row.mediaMetadata.isBrowsable)) {
+                continue;
+            }
+            if (selectedId.equals(row.mediaId)) {
+                start = queue.size();
+            }
+            queue.add(new MediaItem.Builder().setMediaId(row.mediaId).build());
+        }
+        if (queue.isEmpty()) {
+            return;
+        }
+        browser.setMediaItems(queue, start, 0);
+        browser.prepare();
+        browser.play();
+    }
+
     @Override protected void onStart() {
         super.onStart();
         downloads = Downloads.get(this);
         downloads.addListener(downloadChanged);
         main.post(downloadProgress);
+        main.post(connectivityWatch);
+        onlineState = downloads.online();
         updateSessionUi();
         browserFuture = new MediaBrowser.Builder(this,
                 new SessionToken(this, new ComponentName(this, PlaybackService.class))).buildAsync();
@@ -246,7 +322,15 @@ public final class MainActivity extends AppCompatActivity {
                         }
                     }
                     @Override public void onPlayerError(PlaybackException error) {
-                        showStatus(getString(R.string.playback_error));
+                        MediaItem current = browser.getCurrentMediaItem();
+                        String url = current == null ? null : downloadUrl(current);
+                        if (downloads != null && !downloads.online()
+                                && (url == null || !downloads.completed(url))) {
+                            waitForConnectivity = true;
+                            showStatus(getString(R.string.playback_waiting_connection));
+                        } else {
+                            showStatus(getString(R.string.playback_error));
+                        }
                     }
                 });
                 updatePlaying();
@@ -289,6 +373,8 @@ public final class MainActivity extends AppCompatActivity {
         requestVersion++;
         main.removeCallbacks(searchLater);
         main.removeCallbacks(downloadProgress);
+        main.removeCallbacks(connectivityWatch);
+        waitForConnectivity = false;
         if (downloads != null) { downloads.removeListener(downloadChanged); }
         controls.setPlayer(null);
         browser = null;
@@ -302,6 +388,9 @@ public final class MainActivity extends AppCompatActivity {
     @Override protected void onDestroy() {
         if (loginDialog != null) {
             loginDialog.dismiss();
+        }
+        if (settingsDialog != null) {
+            settingsDialog.dismiss();
         }
         main.removeCallbacksAndMessages(null);
         workers.shutdownNow();
@@ -331,12 +420,6 @@ public final class MainActivity extends AppCompatActivity {
         }
         int version = ++requestVersion;
         String query = search.getText().toString().trim();
-        findViewById(R.id.back).setVisibility(history.isEmpty() ? View.INVISIBLE : View.VISIBLE);
-        breadcrumb.setText(queueView ? getString(R.string.queue)
-            : parent.equals(Catalog.DOWNLOADS) ? getString(R.string.downloads)
-                : !query.isEmpty() ? query : parent.equals(Catalog.ALBUMS) ? getString(R.string.albums)
-                : parent.equals(Catalog.FOLDERS) ? getString(R.string.folders)
-                : parent.substring(parent.indexOf(':') + 1));
         if (queueView) {
             rows.clear();
             for (int index = 0; index < browser.getMediaItemCount(); index++) {
@@ -349,8 +432,9 @@ public final class MainActivity extends AppCompatActivity {
         }
         busy(true);
         showStatus(null);
+        boolean localOffline = parent.equals(Catalog.DOWNLOADS) || parent.startsWith(Catalog.OFFLINE);
         ListenableFuture<LibraryResult<com.google.common.collect.ImmutableList<MediaItem>>> result =
-            query.isEmpty() || parent.equals(Catalog.DOWNLOADS) ? browser.getChildren(parent, 0, Integer.MAX_VALUE, null)
+            query.isEmpty() || localOffline ? browser.getChildren(parent, 0, Integer.MAX_VALUE, null)
                         : browser.getSearchResult(query, 0, Integer.MAX_VALUE, null);
         Futures.addCallback(result, new FutureCallback<LibraryResult<com.google.common.collect.ImmutableList<MediaItem>>>() {
             @Override public void onSuccess(LibraryResult<com.google.common.collect.ImmutableList<MediaItem>> response) {
@@ -359,9 +443,10 @@ public final class MainActivity extends AppCompatActivity {
                 }
                 busy(false);
                 rows.clear();
+                collectionStates.clear();
                 if (response.resultCode == LibraryResult.RESULT_SUCCESS && response.value != null) {
                     for (MediaItem entry : response.value) {
-                        if (!parent.equals(Catalog.DOWNLOADS) || query.isEmpty()
+                        if (!localOffline || query.isEmpty()
                                 || String.valueOf(entry.mediaMetadata.title).toLowerCase(java.util.Locale.ROOT)
                                 .contains(query.toLowerCase(java.util.Locale.ROOT))) {
                             rows.add(entry);
@@ -373,6 +458,7 @@ public final class MainActivity extends AppCompatActivity {
                     showStatus(response.resultCode == SessionError.ERROR_SESSION_AUTHENTICATION_EXPIRED
                             ? getString(R.string.auth_error) : getString(R.string.offline));
                 }
+                refreshCollectionStates();
                 adapter.notifyDataSetChanged();
                 if (response.resultCode == SessionError.ERROR_SESSION_AUTHENTICATION_EXPIRED) {
                     showLogin(true);
@@ -475,8 +561,161 @@ public final class MainActivity extends AppCompatActivity {
         showLogin(false);
     }
 
+    private void showSettings() {
+        if (isFinishing() || (settingsDialog != null && settingsDialog.isShowing())) {
+            return;
+        }
+        Settings.Snapshot account = Settings.get(this).current();
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        int padding = (int) (24 * getResources().getDisplayMetrics().density);
+        form.setPadding(padding, padding / 2, padding, 0);
+
+        TextView cacheSection = new TextView(this);
+        cacheSection.setText(R.string.cache_section);
+        cacheSection.setTextColor(Color.rgb(230, 230, 230));
+        cacheSection.setTextSize(16);
+        form.addView(cacheSection, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView cacheValue = new TextView(this);
+        int cacheGb = (int) (Settings.normalizeCacheBytes(account.cacheBytes) / (1024L * 1024L * 1024L));
+        cacheValue.setText(getString(R.string.cache_size_value, cacheGb));
+        cacheValue.setPadding(0, padding / 4, 0, 0);
+        form.addView(cacheValue, new LinearLayout.LayoutParams(-1, -2));
+
+        SeekBar cacheSlider = new SeekBar(this);
+        cacheSlider.setId(R.id.cache_size_slider);
+        cacheSlider.setMax(9);
+        cacheSlider.setProgress(Math.max(0, Math.min(9, cacheGb - 1)));
+        form.addView(cacheSlider, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView clearCache = new TextView(this);
+        clearCache.setId(R.id.clear_cache_action);
+        clearCache.setText(R.string.clear_cache);
+        clearCache.setPadding(0, padding / 3, 0, 0);
+        clearCache.setTextColor(Color.rgb(245, 190, 110));
+        clearCache.setClickable(true);
+        clearCache.setFocusable(true);
+        form.addView(clearCache, new LinearLayout.LayoutParams(-1, -2));
+
+        BandwidthUsage.Snapshot usage = BandwidthUsage.snapshot(this);
+        TextView bandwidthSection = new TextView(this);
+        bandwidthSection.setText(R.string.bandwidth_section);
+        bandwidthSection.setPadding(0, padding, 0, 0);
+        bandwidthSection.setTextColor(Color.rgb(230, 230, 230));
+        bandwidthSection.setTextSize(16);
+        form.addView(bandwidthSection, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView wifiUsage = new TextView(this);
+        wifiUsage.setText(getString(R.string.bandwidth_wifi) + "\n"
+            + getString(R.string.bandwidth_today, Formatter.formatFileSize(this, usage.wifiToday)) + "\n"
+            + getString(R.string.bandwidth_week, Formatter.formatFileSize(this, usage.wifiWeek)));
+        wifiUsage.setPadding(0, padding / 4, 0, 0);
+        form.addView(wifiUsage, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView mobileUsage = new TextView(this);
+        mobileUsage.setText(getString(R.string.bandwidth_mobile) + "\n"
+            + getString(R.string.bandwidth_today, Formatter.formatFileSize(this, usage.mobileToday)) + "\n"
+            + getString(R.string.bandwidth_week, Formatter.formatFileSize(this, usage.mobileWeek)));
+        mobileUsage.setPadding(0, padding / 4, 0, 0);
+        form.addView(mobileUsage, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView debugSection = new TextView(this);
+        debugSection.setText(R.string.debug_section);
+        debugSection.setPadding(0, padding, 0, 0);
+        debugSection.setTextColor(Color.rgb(230, 230, 230));
+        debugSection.setTextSize(16);
+        form.addView(debugSection, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView debugDownloads = new TextView(this);
+        debugDownloads.setId(R.id.debug_downloads_action);
+        debugDownloads.setText(R.string.debug_show_downloaded_mp3);
+        debugDownloads.setPadding(0, padding / 3, 0, 0);
+        debugDownloads.setTextColor(Color.rgb(110, 185, 245));
+        debugDownloads.setClickable(true);
+        debugDownloads.setFocusable(true);
+        form.addView(debugDownloads, new LinearLayout.LayoutParams(-1, -2));
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(form);
+
+        settingsDialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.settings)
+                .setView(scroll)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.connect, (dialog, which) -> showLogin())
+                .create();
+        settingsDialog.setOnShowListener(ignored -> {
+            settingsDialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+            cacheSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar slider, int progress, boolean fromUser) {
+                    int selectedGb = progress + 1;
+                    cacheValue.setText(getString(R.string.cache_size_value, selectedGb));
+                    if (fromUser) {
+                        Settings.get(MainActivity.this).setCacheBytes(selectedGb * 1024L * 1024L * 1024L);
+                    }
+                }
+
+                @Override public void onStartTrackingTouch(SeekBar slider) { }
+
+                @Override public void onStopTrackingTouch(SeekBar slider) { }
+            });
+            clearCache.setOnClickListener(view -> workers.submit(() -> {
+                main.post(() -> new AlertDialog.Builder(MainActivity.this)
+                        .setMessage(R.string.clear_cache_confirm)
+                        .setNegativeButton(android.R.string.no, null)
+                        .setPositiveButton(android.R.string.yes, (dialog, which) -> workers.submit(() -> {
+                            try {
+                                Downloads.get(MainActivity.this).clearPlaybackCache();
+                                main.post(() -> Toast.makeText(MainActivity.this,
+                                        getString(R.string.cache_cleared), Toast.LENGTH_SHORT).show());
+                            } catch (Exception failure) {
+                                main.post(() -> showStatus(getString(R.string.cache_clear_failed)));
+                            }
+                        }))
+                        .show());
+            }));
+            debugDownloads.setOnClickListener(view -> showDownloadedMp3DebugList());
+        });
+        settingsDialog.show();
+    }
+
+    private void showDownloadedMp3DebugList() {
+        workers.submit(() -> {
+            try {
+                List<String> names = Downloads.get(MainActivity.this).debugMergedMp3List();
+                main.post(() -> {
+                    if (isDestroyed()) {
+                        return;
+                    }
+                    if (names.isEmpty()) {
+                        new AlertDialog.Builder(MainActivity.this)
+                                .setTitle(R.string.debug_downloaded_mp3_title)
+                                .setMessage(R.string.debug_no_downloaded_mp3)
+                                .setPositiveButton(R.string.cancel, null)
+                                .show();
+                        return;
+                    }
+                    new AlertDialog.Builder(MainActivity.this)
+                            .setTitle(R.string.debug_downloaded_mp3_title)
+                            .setItems(names.toArray(new String[0]), null)
+                            .setPositiveButton(R.string.cancel, null)
+                            .show();
+                });
+            } catch (Exception failure) {
+                main.post(() -> showStatus(failure.getMessage() == null
+                        ? getString(R.string.offline) : failure.getMessage()));
+            }
+        });
+    }
+
     private void showLogin(boolean passwordRequired) {
-        if (isFinishing() || (loginDialog != null && loginDialog.isShowing())) {
+        showConnectionDialog(passwordRequired, false);
+    }
+
+    private void showConnectionDialog(boolean passwordRequired, boolean includeCache) {
+        AlertDialog existing = includeCache ? settingsDialog : loginDialog;
+        if (isFinishing() || (existing != null && existing.isShowing())) {
             return;
         }
         Settings.Snapshot account = Settings.get(this).current();
@@ -511,9 +750,13 @@ public final class MainActivity extends AppCompatActivity {
         passwordFields.setVisibility(passwordRequired || account.requiresPassword ? View.VISIBLE : View.GONE);
         EditText password = new EditText(this);
         password.setId(R.id.server_password);
-        password.setHint(account.token.isEmpty() ? R.string.password : R.string.password_saved);
+        password.setHint(R.string.password);
         password.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         password.setSingleLine(true);
+        if (!account.token.isEmpty()) {
+            password.setText(MASKED_PASSWORD);
+            password.setSelection(MASKED_PASSWORD.length());
+        }
         password.setSaveEnabled(false);
         password.setAutofillHints(View.AUTOFILL_HINT_PASSWORD);
         passwordFields.addView(password, new LinearLayout.LayoutParams(-1, -2));
@@ -524,6 +767,35 @@ public final class MainActivity extends AppCompatActivity {
         remember.setSaveEnabled(false);
         passwordFields.addView(remember, new LinearLayout.LayoutParams(-1, -2));
         form.addView(passwordFields, new LinearLayout.LayoutParams(-1, -2));
+        TextView cacheValue = null;
+        SeekBar cacheSlider = null;
+        TextView clearCache = null;
+        if (includeCache) {
+            TextView cacheSection = new TextView(this);
+            cacheSection.setText(R.string.cache_section);
+            cacheSection.setPadding(0, padding / 2, 0, 0);
+            cacheSection.setTextColor(Color.rgb(230, 230, 230));
+            cacheSection.setTextSize(16);
+            form.addView(cacheSection, new LinearLayout.LayoutParams(-1, -2));
+            cacheValue = new TextView(this);
+            int cacheGb = (int) (Settings.normalizeCacheBytes(account.cacheBytes) / (1024L * 1024L * 1024L));
+            cacheValue.setText(getString(R.string.cache_size_value, cacheGb));
+            cacheValue.setPadding(0, padding / 4, 0, 0);
+            form.addView(cacheValue, new LinearLayout.LayoutParams(-1, -2));
+            cacheSlider = new SeekBar(this);
+            cacheSlider.setId(R.id.cache_size_slider);
+            cacheSlider.setMax(9);
+            cacheSlider.setProgress(Math.max(0, Math.min(9, cacheGb - 1)));
+            form.addView(cacheSlider, new LinearLayout.LayoutParams(-1, -2));
+            clearCache = new TextView(this);
+            clearCache.setId(R.id.clear_cache_action);
+            clearCache.setText(R.string.clear_cache);
+            clearCache.setPadding(0, padding / 3, 0, 0);
+            clearCache.setTextColor(Color.rgb(245, 190, 110));
+            clearCache.setClickable(true);
+            clearCache.setFocusable(true);
+            form.addView(clearCache, new LinearLayout.LayoutParams(-1, -2));
+        }
         TextView error = new TextView(this);
         error.setId(R.id.connection_error);
         error.setPadding(0, padding / 2, 0, padding / 2);
@@ -545,33 +817,69 @@ public final class MainActivity extends AppCompatActivity {
         ScrollView scroll = new ScrollView(this);
         scroll.addView(form);
         AlertDialog.Builder builder = new AlertDialog.Builder(this)
-            .setTitle(R.string.connection_title).setView(scroll)
+            .setTitle(includeCache ? R.string.settings : R.string.connection_title).setView(scroll)
                 .setPositiveButton(R.string.connect, null).setNegativeButton(R.string.cancel, null);
         if (canSignOut) {
             builder.setNeutralButton(R.string.logout, (dialog, which) -> signOut());
         }
-        loginDialog = builder.create();
-        loginDialog.setOnShowListener(ignored -> {
-            loginDialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
-            loginDialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(button -> {
-                final String normalized;
+        AlertDialog dialog = builder.create();
+        if (includeCache) {
+            settingsDialog = dialog;
+        } else {
+            loginDialog = dialog;
+        }
+        final TextView finalCacheValue = cacheValue;
+        final SeekBar finalCacheSlider = cacheSlider;
+        final TextView finalClearCache = clearCache;
+        dialog.setOnShowListener(ignored -> {
+            dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+            if (includeCache && finalCacheSlider != null && finalCacheValue != null && finalClearCache != null) {
+                finalCacheSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                    @Override public void onProgressChanged(SeekBar slider, int progress, boolean fromUser) {
+                        int selectedGb = progress + 1;
+                        finalCacheValue.setText(getString(R.string.cache_size_value, selectedGb));
+                        if (fromUser) {
+                            Settings.get(MainActivity.this).setCacheBytes(selectedGb * 1024L * 1024L * 1024L);
+                        }
+                    }
+
+                    @Override public void onStartTrackingTouch(SeekBar slider) { }
+
+                    @Override public void onStopTrackingTouch(SeekBar slider) { }
+                });
+                finalClearCache.setOnClickListener(view -> workers.submit(() -> {
+                    try {
+                        Downloads.get(MainActivity.this).clearPlaybackCache();
+                        main.post(() -> Toast.makeText(MainActivity.this,
+                                getString(R.string.cache_cleared), Toast.LENGTH_SHORT).show());
+                    } catch (Exception failure) {
+                        main.post(() -> showStatus(getString(R.string.cache_clear_failed)));
+                    }
+                }));
+            }
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(button -> {
+                final List<String> candidates;
+                final boolean implicitScheme;
                 try {
-                    normalized = AzifyClient.normalizeServer(server.getText().toString());
+                    implicitScheme = !AzifyClient.hasExplicitScheme(server.getText().toString());
+                    candidates = AzifyClient.connectionCandidates(server.getText().toString());
                 } catch (IllegalArgumentException invalid) {
                     error.setText(invalid.getMessage());
                     return;
                 }
-                if (normalized.startsWith("http://") && !allowHttp.isChecked()) {
+                final String primary = candidates.get(0);
+                if (primary.startsWith("http://") && !allowHttp.isChecked()) {
                     error.setText(R.string.insecure_http_not_allowed);
                     return;
                 }
                 String entered = password.getText().toString();
-                String token = entered.isEmpty() && normalized.equals(account.server) ? account.token
-                        : entered.isEmpty() ? "" : AzifyClient.passwordHash(entered);
+                String token = ((entered.isEmpty() || MASKED_PASSWORD.equals(entered))
+                    && primary.equals(account.server)) ? account.token
+                    : entered.isEmpty() ? "" : AzifyClient.passwordHash(entered);
                 boolean keepPassword = remember.isChecked();
                 boolean allowInsecure = allowHttp.isChecked();
                 password.setText("");
-                AlertDialog active = loginDialog;
+                AlertDialog active = dialog;
                 active.setCancelable(false);
                 server.setEnabled(false);
                 password.setEnabled(false);
@@ -584,10 +892,36 @@ public final class MainActivity extends AppCompatActivity {
                 }
                 error.setText(R.string.connecting);
                 ListenableFuture<AzifyClient.Connection> validation = workers.submit(() -> {
-                    AzifyClient.Connection connection = new AzifyClient().connect(normalized, token);
-                    Settings.get(MainActivity.this).save(normalized, connection.token,
-                            connection.requiresPassword, keepPassword, allowInsecure);
-                        Downloads.get(MainActivity.this).saveCatalog(normalized, connection.catalog);
+                    AzifyClient client = new AzifyClient();
+                    IOException lastError = null;
+                    String selected = primary;
+                    AzifyClient.Connection connection = null;
+                    for (int i = 0; i < candidates.size(); i++) {
+                        String candidate = candidates.get(i);
+                        try {
+                            connection = client.connect(candidate, token);
+                            selected = candidate;
+                            break;
+                        } catch (AzifyClient.AuthenticationException auth) {
+                            throw auth;
+                        } catch (IOException failure) {
+                            lastError = failure;
+                            if (!implicitScheme || i == candidates.size() - 1) {
+                                break;
+                            }
+                        }
+                    }
+                    if (connection == null) {
+                        if (implicitScheme) {
+                            throw new IOException(getString(R.string.server_not_found), lastError);
+                        }
+                        throw lastError == null ? new IOException(getString(R.string.offline)) : lastError;
+                    }
+                    boolean resolvedAllowInsecure = selected.startsWith("http://")
+                            ? (implicitScheme || allowInsecure) : false;
+                    Settings.get(MainActivity.this).save(selected, connection.token,
+                            connection.requiresPassword, keepPassword, resolvedAllowInsecure);
+                    Downloads.get(MainActivity.this).saveCatalog(selected, connection.catalog);
                     return connection;
                 });
                 Futures.addCallback(validation, new FutureCallback<AzifyClient.Connection>() {
@@ -597,7 +931,8 @@ public final class MainActivity extends AppCompatActivity {
                         }
                         active.dismiss();
                         updateSessionUi();
-                        refresh(!account.server.equals(normalized) || !account.token.equals(connection.token));
+                        Settings.Snapshot current = Settings.get(MainActivity.this).current();
+                        refresh(!account.server.equals(current.server) || !account.token.equals(connection.token));
                     }
                     @Override public void onFailure(@NonNull Throwable failure) {
                         if (isDestroyed()) {
@@ -624,7 +959,7 @@ public final class MainActivity extends AppCompatActivity {
                 }, ui);
             });
         });
-        loginDialog.show();
+        dialog.show();
     }
 
     private void updateSessionUi() {
@@ -643,6 +978,7 @@ public final class MainActivity extends AppCompatActivity {
 
     private void signOut() {
         if (loginDialog != null) { loginDialog.dismiss(); }
+        if (settingsDialog != null) { settingsDialog.dismiss(); }
         if (browser != null) {
             browser.pause();
             browser.stop();
@@ -697,8 +1033,31 @@ public final class MainActivity extends AppCompatActivity {
         menu.show();
     }
 
+    private void onCollectionDownloadPressed(MediaItem entry, int collectionState) {
+        if (collectionState == Downloads.COLLECTION_ACTIVE) {
+            new AlertDialog.Builder(this)
+                    .setMessage(R.string.cancel_download_collection_question)
+                    .setNegativeButton(R.string.cancel, null)
+                    .setPositiveButton(R.string.cancel_download,
+                            (dialog, which) -> download(entry.mediaId, true))
+                    .show();
+            return;
+        }
+        if (collectionState == Downloads.COLLECTION_DONE) {
+            new AlertDialog.Builder(this)
+                    .setMessage(R.string.remove_download_collection_question)
+                    .setNegativeButton(R.string.cancel, null)
+                    .setPositiveButton(R.string.remove_download,
+                            (dialog, which) -> download(entry.mediaId, true))
+                    .show();
+            return;
+        }
+        download(entry.mediaId, false);
+    }
+
     private void download(String id, boolean remove) {
         if (downloads == null) { return; }
+        boolean removing = remove;
         if (!remove && !Settings.get(this).current().configured) { showLogin(true); return; }
         if (!remove && android.os.Build.VERSION.SDK_INT >= 33
                 && androidx.core.content.ContextCompat.checkSelfPermission(this,
@@ -711,11 +1070,22 @@ public final class MainActivity extends AppCompatActivity {
                 return () -> downloads.remove(ids);
             }
             List<androidx.media3.exoplayer.offline.DownloadRequest> requests = downloads.requests(id);
-            return () -> downloads.add(requests);
+            return () -> {
+                downloads.watchCollection(id);
+                downloads.add(requests);
+            };
         });
         Futures.addCallback(prepared, new FutureCallback<Runnable>() {
             @Override public void onSuccess(Runnable action) {
-                if (!isDestroyed()) { action.run(); adapter.notifyDataSetChanged(); }
+                if (!isDestroyed()) {
+                    action.run();
+                    adapter.notifyDataSetChanged();
+                    refreshCollectionStates();
+                    if (removing && (parent.equals(Catalog.DOWNLOADS) || parent.startsWith(Catalog.OFFLINE))) {
+                        main.postDelayed(MainActivity.this::load, 300);
+                        main.postDelayed(MainActivity.this::load, 1200);
+                    }
+                }
             }
             @Override public void onFailure(@NonNull Throwable error) {
                 if (!isDestroyed()) { showStatus(error.getMessage()); }
@@ -762,6 +1132,31 @@ public final class MainActivity extends AppCompatActivity {
         }, ui);
     }
 
+    private void refreshCollectionStates() {
+        if (downloads == null || rows.isEmpty()) {
+            collectionStates.clear();
+            return;
+        }
+        List<MediaItem> snapshot = new ArrayList<>(rows);
+        workers.submit(() -> {
+            Map<String, Integer> updated = new HashMap<>();
+            for (MediaItem item : snapshot) {
+                if (!Boolean.TRUE.equals(item.mediaMetadata.isBrowsable)) {
+                    continue;
+                }
+                updated.put(item.mediaId, downloads.collectionState(item.mediaId));
+            }
+            main.post(() -> {
+                if (isDestroyed()) {
+                    return;
+                }
+                collectionStates.clear();
+                collectionStates.putAll(updated);
+                adapter.notifyDataSetChanged();
+            });
+        });
+    }
+
     private final class LibraryAdapter extends BaseAdapter {
         @Override public int getCount() { return rows.size(); }
         @Override public MediaItem getItem(int position) { return rows.get(position); }
@@ -780,18 +1175,67 @@ public final class MainActivity extends AppCompatActivity {
                     && browser.getCurrentMediaItem().mediaId.equals(entry.mediaId.startsWith(Catalog.OFFLINE)
                     ? entry.mediaId.substring(Catalog.OFFLINE.length()) : entry.mediaId);
             title.setTextColor(current ? Color.rgb(29, 185, 84) : Color.rgb(245, 245, 245));
-            ImageButton play = row.findViewById(R.id.row_play);
-            play.setVisibility(Boolean.TRUE.equals(entry.mediaMetadata.isBrowsable)
-                    && Boolean.TRUE.equals(entry.mediaMetadata.isPlayable) ? View.VISIBLE : View.GONE);
-            play.setOnClickListener(view -> MainActivity.this.play(entry.mediaId));
                 ImageButton download = row.findViewById(R.id.row_download);
-                download.setImageResource(downloads != null && downloadUrl(entry) != null
-                    && downloads.completed(downloadUrl(entry)) ? android.R.drawable.stat_sys_download_done
-                    : android.R.drawable.stat_sys_download);
-                download.setOnClickListener(view -> downloadMenu(entry, view));
+                boolean downloadVisible = !queueView && !parent.equals(Catalog.DOWNLOADS)
+                    && !parent.startsWith(Catalog.OFFLINE)
+                    && Boolean.TRUE.equals(entry.mediaMetadata.isBrowsable);
+                download.setVisibility(downloadVisible ? View.VISIBLE : View.GONE);
+                if (downloadVisible) {
+                    int collectionState = collectionStates.getOrDefault(entry.mediaId, Downloads.COLLECTION_NONE);
+                    updateDownloadIcon(download, collectionState);
+                    if (collectionState == Downloads.COLLECTION_ACTIVE) {
+                        download.setOnClickListener(null);
+                        download.setOnTouchListener((view, event) -> {
+                            if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                                onCollectionDownloadPressed(entry, Downloads.COLLECTION_ACTIVE);
+                                return true;
+                            }
+                            return false;
+                        });
+                    } else {
+                        download.setOnTouchListener(null);
+                        download.setOnClickListener(view -> onCollectionDownloadPressed(entry, collectionState));
+                    }
+                } else {
+                    download.clearAnimation();
+                    download.setImageTintList(ColorStateList.valueOf(Color.rgb(189, 189, 189)));
+                    download.setImageResource(android.R.drawable.stat_sys_download);
+                    download.setOnTouchListener(null);
+                    download.setOnClickListener(null);
+                }
             loadImage(row.findViewById(R.id.art), entry.mediaMetadata.artworkUri,
                     Boolean.TRUE.equals(entry.mediaMetadata.isBrowsable));
             return row;
+        }
+
+        private void updateDownloadIcon(ImageButton button, int collectionState) {
+            if (collectionState == Downloads.COLLECTION_DONE) {
+                if (button.getAnimation() != null) {
+                    button.clearAnimation();
+                }
+                button.setImageResource(R.drawable.ic_download_done_circle);
+                button.setImageTintList(null);
+                return;
+            }
+            button.setImageResource(android.R.drawable.stat_sys_download);
+            if (collectionState == Downloads.COLLECTION_ACTIVE) {
+                button.setImageResource(R.drawable.ic_download_loading_small);
+                button.setImageTintList(null);
+                if (button.getAnimation() == null) {
+                    RotateAnimation rotate = new RotateAnimation(0, 360,
+                            RotateAnimation.RELATIVE_TO_SELF, 0.5f,
+                            RotateAnimation.RELATIVE_TO_SELF, 0.5f);
+                    rotate.setInterpolator(new LinearInterpolator());
+                    rotate.setDuration(2700);
+                    rotate.setRepeatCount(RotateAnimation.INFINITE);
+                    button.startAnimation(rotate);
+                }
+                return;
+            }
+            if (button.getAnimation() != null) {
+                button.clearAnimation();
+            }
+            button.setImageTintList(ColorStateList.valueOf(Color.rgb(189, 189, 189)));
         }
     }
 }

@@ -1,6 +1,7 @@
 package org.azify.client;
 
 import android.content.Context;
+import android.content.Intent;
 import android.net.ConnectivityManager;
 import android.net.NetworkCapabilities;
 import android.net.Uri;
@@ -9,11 +10,15 @@ import android.os.Looper;
 import android.util.AtomicFile;
 
 import androidx.annotation.Nullable;
+import androidx.core.app.NotificationCompat;
+import androidx.core.app.NotificationManagerCompat;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.database.StandaloneDatabaseProvider;
 import androidx.media3.datasource.DataSource;
+import androidx.media3.datasource.DataSpec;
 import androidx.media3.datasource.ResolvingDataSource;
 import androidx.media3.datasource.cache.CacheDataSource;
+import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor;
 import androidx.media3.datasource.cache.NoOpCacheEvictor;
 import androidx.media3.datasource.cache.SimpleCache;
 import androidx.media3.datasource.okhttp.OkHttpDataSource;
@@ -30,6 +35,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -43,18 +49,30 @@ import java.util.concurrent.TimeUnit;
 
 @UnstableApi
 final class Downloads {
+    static final int COLLECTION_NONE = 0;
+    static final int COLLECTION_ACTIVE = 1;
+    static final int COLLECTION_DONE = 2;
+
     private static Downloads instance;
     private final Context context;
     private final Settings settings;
-    private final SimpleCache cache;
+    private final SimpleCache downloadCache;
+    private final SimpleCache playbackCache;
     private final DataSource.Factory upstream;
     private final DownloadManager manager;
     private final Map<String, Download> states = new ConcurrentHashMap<>();
     private final Set<Runnable> listeners = new CopyOnWriteArraySet<>();
+    private final ExecutorService downloadWorkers = Executors.newFixedThreadPool(8);
     private final ExecutorService disk = Executors.newSingleThreadExecutor();
+    private final ExecutorService prefetch = Executors.newFixedThreadPool(2);
     private final Handler main = new Handler(Looper.getMainLooper());
     private final File catalogs;
     private final CountDownLatch indexed = new CountDownLatch(1);
+    private final Set<String> watchedCollections = ConcurrentHashMap.newKeySet();
+    private final Set<String> announcedCollections = ConcurrentHashMap.newKeySet();
+    private final Set<String> prefetching = ConcurrentHashMap.newKeySet();
+    private String cachedCatalogServer;
+    private Catalog cachedCatalog;
 
     static synchronized Downloads get(Context context) {
         if (instance == null) {
@@ -68,9 +86,11 @@ final class Downloads {
         settings = Settings.get(context);
         catalogs = new File(context.getFilesDir(), "catalogs");
         StandaloneDatabaseProvider database = new StandaloneDatabaseProvider(context);
-        cache = new SimpleCache(new File(context.getFilesDir(), "downloaded-audio"),
+        downloadCache = new SimpleCache(new File(context.getFilesDir(), "downloaded-audio"),
                 new NoOpCacheEvictor(), database);
-        AzifyClient client = new AzifyClient();
+        playbackCache = new SimpleCache(new File(context.getFilesDir(), "playback-cache"),
+            new LeastRecentlyUsedCacheEvictor(settings.current().cacheBytes), database);
+        AzifyClient client = new AzifyClient(context);
         upstream = new ResolvingDataSource.Factory(new OkHttpDataSource.Factory(client.streamingHttp), spec -> {
             Settings.Snapshot account = settings.current();
             if (!account.configured) {
@@ -78,8 +98,8 @@ final class Downloads {
             }
             return spec.withRequestHeaders(AzifyClient.mediaHeaders(account.server, account.token, spec.uri.toString()));
         });
-        manager = new DownloadManager(context, database, cache, upstream, Runnable::run);
-        manager.setMaxParallelDownloads(2);
+        manager = new DownloadManager(context, database, downloadCache, upstream, downloadWorkers);
+        manager.setMaxParallelDownloads(6);
         manager.addListener(new DownloadManager.Listener() {
             @Override public void onInitialized(DownloadManager current) {
                 disk.execute(() -> {
@@ -120,7 +140,92 @@ final class Downloads {
     void removeListener(Runnable listener) { listeners.remove(listener); }
 
     private void changed() {
+        checkCollectionCompletions();
         for (Runnable listener : listeners) { listener.run(); }
+    }
+
+    void watchCollection(String id) {
+        String key = id.startsWith(Catalog.OFFLINE) ? id.substring(Catalog.OFFLINE.length()) : id;
+        watchedCollections.add(key);
+        announcedCollections.remove(key);
+        changed();
+    }
+
+    int collectionState(String id) {
+        Settings.Snapshot account = settings.current();
+        if (!account.configured && !account.offlineAuthorized) {
+            return COLLECTION_NONE;
+        }
+        String key = id.startsWith(Catalog.OFFLINE) ? id.substring(Catalog.OFFLINE.length()) : id;
+        try {
+            List<Catalog.Entry> tracks = savedCatalog(account.server).tracksUnder(key);
+            if (tracks.isEmpty()) {
+                return COLLECTION_NONE;
+            }
+            boolean allDone = true;
+            boolean anyActive = false;
+            for (Catalog.Entry track : tracks) {
+                if (completed(track.url)) {
+                    continue;
+                }
+                allDone = false;
+                Download state = states.get(track.url);
+                if (state != null && (state.state == Download.STATE_DOWNLOADING
+                        || state.state == Download.STATE_QUEUED
+                        || state.state == Download.STATE_RESTARTING
+                        || state.state == Download.STATE_STOPPED)) {
+                    anyActive = true;
+                }
+            }
+            return allDone ? COLLECTION_DONE : anyActive ? COLLECTION_ACTIVE : COLLECTION_NONE;
+        } catch (IOException failure) {
+            return COLLECTION_NONE;
+        }
+    }
+
+    private void checkCollectionCompletions() {
+        if (watchedCollections.isEmpty()) {
+            return;
+        }
+        Settings.Snapshot account = settings.current();
+        if (!account.configured && !account.offlineAuthorized) {
+            return;
+        }
+        for (String id : new ArrayList<>(watchedCollections)) {
+            if (collectionState(id) != COLLECTION_DONE || announcedCollections.contains(id)) {
+                continue;
+            }
+            try {
+                Catalog.Entry entry = savedCatalog(account.server).get(id);
+                String title = entry == null ? id : entry.title;
+                showFinishedNotification(title);
+                announcedCollections.add(id);
+                watchedCollections.remove(id);
+            } catch (IOException ignored) {
+                // Retry next update.
+            }
+        }
+    }
+
+    private void showFinishedNotification(String title) {
+        Intent open = new Intent(context, MainActivity.class);
+        android.app.PendingIntent openPending = android.app.PendingIntent.getActivity(context,
+                title.hashCode(), open,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE);
+        NotificationCompat.Builder notification = new NotificationCompat.Builder(context, "azify-downloads")
+                .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                .setContentTitle(context.getString(R.string.download_finished))
+                .setContentText(title)
+                .setContentIntent(openPending)
+                .setAutoCancel(true)
+                .setOnlyAlertOnce(true)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT);
+        try {
+            NotificationManagerCompat.from(context).notify(0xA2F000 + Math.abs(title.hashCode() % 10_000),
+                    notification.build());
+        } catch (SecurityException ignored) {
+            // Notification permission denied.
+        }
     }
 
     boolean online() {
@@ -130,9 +235,13 @@ final class Downloads {
     }
 
     DataSource.Factory playbackFactory() {
-        CacheDataSource.Factory cached = new CacheDataSource.Factory().setCache(cache)
-                .setUpstreamDataSourceFactory(upstream).setCacheWriteDataSinkFactory(null)
+        CacheDataSource.Factory streamed = new CacheDataSource.Factory().setCache(playbackCache)
+            .setUpstreamDataSourceFactory(upstream)
                 .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR);
+        CacheDataSource.Factory cached = new CacheDataSource.Factory().setCache(downloadCache)
+            .setUpstreamDataSourceFactory(streamed)
+            .setCacheWriteDataSinkFactory(null)
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR);
         return new ResolvingDataSource.Factory(cached, spec -> {
             Settings.Snapshot account = settings.current();
             if (!account.configured && !account.offlineAuthorized) {
@@ -148,8 +257,8 @@ final class Downloads {
     boolean completed(String url) {
         Download download = state(url);
         return download != null && download.state == Download.STATE_COMPLETED
-                && (download.contentLength > 0 ? cache.isCached(url, 0, download.contentLength)
-                : !cache.getCachedSpans(url).isEmpty());
+            && (download.contentLength > 0 ? downloadCache.isCached(url, 0, download.contentLength)
+            : !downloadCache.getCachedSpans(url).isEmpty());
     }
 
     private Set<String> urls(String server, boolean completeOnly) {
@@ -186,6 +295,8 @@ final class Downloads {
             file.failWrite(output);
             throw failure;
         }
+        cachedCatalogServer = server;
+        cachedCatalog = catalog;
     }
 
     private AtomicFile catalogFile(String server) {
@@ -193,8 +304,13 @@ final class Downloads {
     }
 
     synchronized Catalog savedCatalog(String server) throws IOException {
+        if (cachedCatalog != null && server.equals(cachedCatalogServer)) {
+            return cachedCatalog;
+        }
         try {
-            return Catalog.parse(new String(catalogFile(server).readFully(), StandardCharsets.UTF_8), server);
+            cachedCatalog = Catalog.parse(new String(catalogFile(server).readFully(), StandardCharsets.UTF_8), server);
+            cachedCatalogServer = server;
+            return cachedCatalog;
         } catch (JSONException | IllegalArgumentException invalid) {
             throw new IOException("The saved library is not valid.", invalid);
         }
@@ -259,5 +375,121 @@ final class Downloads {
     void pause() {
         manager.setStopReason(null, 1);
         manager.pauseDownloads();
+    }
+
+    long cacheBytesUsed() {
+        return playbackCache.getCacheSpace();
+    }
+
+    synchronized void clearPlaybackCache() throws IOException {
+        for (String key : new ArrayList<>(playbackCache.getKeys())) {
+            playbackCache.removeResource(key);
+        }
+    }
+
+    void prefetchUpcoming(List<String> urls) {
+        if (urls == null || urls.isEmpty()) {
+            return;
+        }
+        for (String url : urls) {
+            if (url == null || url.isEmpty()) {
+                continue;
+            }
+            if (!prefetching.add(url)) {
+                continue;
+            }
+            prefetch.submit(() -> {
+                try {
+                    if (completed(url) || !playbackCache.getCachedSpans(url).isEmpty()) {
+                        return;
+                    }
+                    if (!online() && downloadCache.getCachedSpans(url).isEmpty()) {
+                        return;
+                    }
+                    DataSource source = playbackFactory().createDataSource();
+                    try {
+                        source.open(new DataSpec.Builder().setUri(url).setKey(url).build());
+                        byte[] buffer = new byte[64 * 1024];
+                        while (source.read(buffer, 0, buffer.length) != -1) {
+                            // Read to EOF so Media3 writes bytes to playback cache.
+                        }
+                    } finally {
+                        source.close();
+                    }
+                } catch (Exception ignored) {
+                    // Best-effort prefetch.
+                } finally {
+                    prefetching.remove(url);
+                }
+            });
+        }
+    }
+
+    List<String> debugMergedMp3List() {
+        Set<String> manual = new HashSet<>();
+        try {
+            for (Catalog.Entry entry : library(true).tracks()) {
+                String source = entry.url == null && entry.id.startsWith("track:")
+                        ? entry.id.substring("track:".length()) : entry.url;
+                String path = relativeMp3Path(source);
+                if (path != null) {
+                    manual.add(path);
+                }
+            }
+        } catch (IOException ignored) {
+            // Manual list is unavailable without a valid offline catalog.
+        }
+
+        Set<String> cached = new HashSet<>();
+        for (String key : new ArrayList<>(playbackCache.getKeys())) {
+            String path = relativeMp3Path(key);
+            if (path != null) {
+                cached.add(path);
+            }
+        }
+
+        Set<String> merged = new HashSet<>();
+        merged.addAll(manual);
+        merged.addAll(cached);
+        List<String> sorted = new ArrayList<>(merged);
+        sorted.sort((left, right) -> {
+            int leftSlash = left.lastIndexOf('/');
+            int rightSlash = right.lastIndexOf('/');
+            String leftFolder = leftSlash < 0 ? "" : left.substring(0, leftSlash);
+            String rightFolder = rightSlash < 0 ? "" : right.substring(0, rightSlash);
+            int byFolder = leftFolder.compareToIgnoreCase(rightFolder);
+            if (byFolder != 0) {
+                return byFolder;
+            }
+            String leftName = leftSlash < 0 ? left : left.substring(leftSlash + 1);
+            String rightName = rightSlash < 0 ? right : right.substring(rightSlash + 1);
+            return leftName.compareToIgnoreCase(rightName);
+        });
+
+        List<String> labeled = new ArrayList<>(sorted.size());
+        for (String item : sorted) {
+            boolean inManual = manual.contains(item);
+            boolean inCache = cached.contains(item);
+            String label = inManual && inCache ? "USER+CACHE" : inManual ? "USER" : "CACHE";
+            labeled.add("[" + label + "] " + item);
+        }
+        return Collections.unmodifiableList(labeled);
+    }
+
+    @Nullable
+    private static String relativeMp3Path(@Nullable String source) {
+        if (source == null) {
+            return null;
+        }
+        String value = source;
+        okhttp3.HttpUrl parsed = okhttp3.HttpUrl.parse(source);
+        if (parsed != null) {
+            value = parsed.encodedPath();
+        }
+        if (value.startsWith("/music/")) {
+            value = value.substring(7);
+        }
+        value = Uri.decode(value);
+        return value.toLowerCase(java.util.Locale.ROOT).endsWith(".mp3") ? value : null;
     }
 }

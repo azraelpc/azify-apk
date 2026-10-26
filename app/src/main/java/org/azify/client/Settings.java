@@ -18,6 +18,9 @@ import javax.crypto.spec.GCMParameterSpec;
 
 final class Settings {
     private static final String KEY_ALIAS = "azify.server.token";
+    static final long DEFAULT_CACHE_BYTES = 2L * 1024L * 1024L * 1024L;
+    static final long MIN_CACHE_BYTES = 1L * 1024L * 1024L * 1024L;
+    static final long MAX_CACHE_BYTES = 10L * 1024L * 1024L * 1024L;
     private static Settings instance;
 
     static final class Snapshot {
@@ -28,14 +31,24 @@ final class Settings {
         final boolean rememberPassword;
         final boolean offlineAuthorized;
         final boolean allowInsecureHttp;
+        final boolean queueEnabled;
+        final long cacheBytes;
 
         Snapshot(String server, String token, boolean configured,
             boolean requiresPassword, boolean rememberPassword, boolean offlineAuthorized) {
-            this(server, token, configured, requiresPassword, rememberPassword, offlineAuthorized, false);
+            this(server, token, configured, requiresPassword, rememberPassword,
+                    offlineAuthorized, false, false, DEFAULT_CACHE_BYTES);
         }
 
         Snapshot(String server, String token, boolean configured, boolean requiresPassword,
                 boolean rememberPassword, boolean offlineAuthorized, boolean allowInsecureHttp) {
+            this(server, token, configured, requiresPassword, rememberPassword,
+                    offlineAuthorized, allowInsecureHttp, false, DEFAULT_CACHE_BYTES);
+        }
+
+        Snapshot(String server, String token, boolean configured, boolean requiresPassword,
+                boolean rememberPassword, boolean offlineAuthorized, boolean allowInsecureHttp,
+                boolean queueEnabled, long cacheBytes) {
             this.server = server;
             this.token = token;
             this.configured = configured;
@@ -43,6 +56,8 @@ final class Settings {
             this.rememberPassword = rememberPassword;
             this.offlineAuthorized = offlineAuthorized;
             this.allowInsecureHttp = allowInsecureHttp;
+            this.queueEnabled = queueEnabled;
+            this.cacheBytes = cacheBytes;
         }
 
         boolean sameAccount(Snapshot other) {
@@ -88,10 +103,13 @@ final class Settings {
             preferences.edit().remove("token").putBoolean("rememberPassword", false).apply();
         }
         boolean allowInsecureHttp = preferences.getBoolean("allowInsecureHttp", false);
+        boolean queueEnabled = preferences.getBoolean("queueEnabled", false);
+        long cacheBytes = normalizeCacheBytes(preferences.getLong("cacheBytes", DEFAULT_CACHE_BYTES));
         boolean transportAllowed = !server.startsWith("http://") || allowInsecureHttp;
         boolean configured = !server.isEmpty() && transportAllowed && (!requiresPassword || !token.isEmpty());
         snapshot = new Snapshot(server, token, configured, requiresPassword, rememberPassword,
-            preferences.getBoolean("offlineAuthorized", false) && transportAllowed, allowInsecureHttp);
+            preferences.getBoolean("offlineAuthorized", false) && transportAllowed, allowInsecureHttp,
+                queueEnabled, cacheBytes);
     }
 
     Snapshot current() {
@@ -136,15 +154,44 @@ final class Settings {
             throw new GeneralSecurityException("Cannot save the connection.");
         }
         snapshot = new Snapshot(server, requiresPassword ? token : "", true, requiresPassword,
-            remember, true, insecure && allowInsecureHttp);
+            remember, true, insecure && allowInsecureHttp,
+                snapshot.queueEnabled, snapshot.cacheBytes);
+    }
+
+    synchronized void saveUiPreferences(boolean queueEnabled, long cacheBytes) {
+        long normalized = normalizeCacheBytes(cacheBytes);
+        if (!preferences.edit().putBoolean("queueEnabled", queueEnabled)
+                .putLong("cacheBytes", normalized).commit()) {
+            return;
+        }
+        Snapshot current = snapshot;
+        snapshot = new Snapshot(current.server, current.token, current.configured, current.requiresPassword,
+                current.rememberPassword, current.offlineAuthorized, current.allowInsecureHttp,
+                queueEnabled, normalized);
+    }
+
+    synchronized void setQueueEnabled(boolean queueEnabled) {
+        saveUiPreferences(queueEnabled, snapshot.cacheBytes);
+    }
+
+    synchronized void setCacheBytes(long cacheBytes) {
+        saveUiPreferences(snapshot.queueEnabled, cacheBytes);
     }
 
     synchronized void signOut() {
         String server = snapshot.server;
         boolean requiresPassword = snapshot.requiresPassword;
         preferences.edit().clear().putString("server", server)
-            .putBoolean("requiresPassword", requiresPassword).apply();
-        snapshot = new Snapshot(server, "", false, requiresPassword, false, false);
+            .putBoolean("requiresPassword", requiresPassword)
+                .putBoolean("queueEnabled", snapshot.queueEnabled)
+                .putLong("cacheBytes", snapshot.cacheBytes)
+                .apply();
+        snapshot = new Snapshot(server, "", false, requiresPassword, false, false, false,
+                snapshot.queueEnabled, snapshot.cacheBytes);
+    }
+
+    static long normalizeCacheBytes(long requested) {
+        return Math.max(MIN_CACHE_BYTES, Math.min(MAX_CACHE_BYTES, requested));
     }
 
     private SecretKey key() throws GeneralSecurityException {
