@@ -1,11 +1,11 @@
-# AZify for Android
+# AZify client for Android
 
 A generic native Android client for [Azify](https://github.com/azraelpc/azify),
 including Android Auto media browsing and persistent offline downloads.
 Requires Android 8.0 or later. The interface and documentation are in English.
 No server, account, password or personal library is included in the APK.
 
-<img  height="700" alt="image" src="https://github.com/user-attachments/assets/75b91eca-96e6-412c-8299-db7520cfc73b" />
+<img height="600" alt="image" src="https://github.com/user-attachments/assets/bdb35b83-af75-4550-ba2e-3b460d475258" /> <img height="600" alt="image" src="https://github.com/user-attachments/assets/d5f0c81e-d64d-461e-9efc-627f5690033f" />
 
 ## Connect
 
