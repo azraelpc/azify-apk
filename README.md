@@ -1,4 +1,4 @@
-# AZify for Android
+# AZify client for Android
 
 A generic native Android client for [Azify](https://github.com/azraelpc/azify),
 including Android Auto media browsing and persistent offline downloads.
