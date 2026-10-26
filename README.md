@@ -5,6 +5,8 @@ including Android Auto media browsing and persistent offline downloads.
 Requires Android 8.0 or later. The interface and documentation are in English.
 No server, account, password or personal library is included in the APK.
 
+<img  height="700" alt="image" src="https://github.com/user-attachments/assets/75b91eca-96e6-412c-8299-db7520cfc73b" />
+
 ## Connect
 
 Open AZify, enter your **AZify Server URL**, and select **Connect**. The URL is
