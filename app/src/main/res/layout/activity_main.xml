@@ -13,6 +13,10 @@
             android:background="?attr/selectableItemBackgroundBorderless"
             android:src="@android:drawable/ic_popup_sync" app:tint="#E5E5E5"
             android:contentDescription="@string/refresh" android:tooltipText="@string/refresh" />
+        <ImageButton android:id="@+id/bluetooth_audio" android:layout_width="48dp" android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/stat_sys_data_bluetooth" app:tint="#E5E5E5"
+            android:contentDescription="@string/bluetooth_audio" android:tooltipText="@string/bluetooth_audio" />
         <ImageButton android:id="@+id/settings" android:layout_width="48dp" android:layout_height="48dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:src="@android:drawable/ic_menu_preferences" app:tint="#E5E5E5"

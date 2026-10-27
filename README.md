@@ -83,6 +83,19 @@ the Settings dialog.
 - Background playback, audio focus and pause when headphones are disconnected.
 - Phone, notification, headset and Android Auto controls use one Media3 session.
 - The last track and playback position are saved for playback resumption.
+- Header includes a **Bluetooth audio** button next to Refresh.
+- The Bluetooth button uses Android's native Bluetooth search flow for nearby
+   pairing devices (same behavior as system Settings).
+- The app view shows/manage **Saved Bluetooth devices** (paired devices).
+- If audio is already connected, tapping the Bluetooth icon first offers a
+   disconnect confirmation flow.
+- Device connect/disconnect actions are finalized in system Bluetooth settings.
+- If pairing asks for a PIN/passkey, common defaults are suggested
+   (`0000`, `1234`, `8888`, `1111`, `9999`, `000000`, `123456`).
+
+Android does not allow third-party apps to force-connect/disconnect A2DP audio
+devices or auto-submit pairing PINs through stable public APIs, so those actions
+are completed through the system Bluetooth UI.
 
 This is a native client, not a WebView. The web portal animation, visualizer and
 Web Audio compressor are not reproduced. Audio format support depends on the

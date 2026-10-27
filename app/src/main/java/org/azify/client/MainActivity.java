@@ -1,12 +1,21 @@
 package org.azify.client;
 
+import android.Manifest;
 import android.app.SearchManager;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothClass;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothManager;
 import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
+import android.media.AudioDeviceInfo;
+import android.media.AudioManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -42,6 +51,7 @@ import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.app.AppCompatDelegate;
+import androidx.core.content.ContextCompat;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
@@ -78,6 +88,7 @@ import java.util.concurrent.Executors;
 @UnstableApi
 public final class MainActivity extends AppCompatActivity {
     private static final String MASKED_PASSWORD = "********";
+    private static final int REQ_BLUETOOTH = 3;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Executor ui = command -> main.post(command);
     private final ListeningExecutorService workers =
@@ -192,6 +203,7 @@ public final class MainActivity extends AppCompatActivity {
         findViewById(R.id.sign_out).setOnClickListener(view -> signOut());
         updateSessionUi();
         findViewById(R.id.refresh).setOnClickListener(view -> refresh(false));
+        findViewById(R.id.bluetooth_audio).setOnClickListener(view -> showBluetoothAudioDialog());
         RadioGroup tabs = findViewById(R.id.tabs);
         tabs.setOnCheckedChangeListener((group, checked) -> {
             queueView = checked == R.id.tab_queue;
@@ -251,6 +263,262 @@ public final class MainActivity extends AppCompatActivity {
         top.addView(input, new LinearLayout.LayoutParams(0, -1, 1));
         root.addView(top, 1, new LinearLayout.LayoutParams(-1,
                 (int) (48 * getResources().getDisplayMetrics().density)));
+    }
+
+    private static final class BtChoice {
+        final String name;
+        final String address;
+        final boolean connected;
+
+        BtChoice(String name, String address, boolean connected) {
+            this.name = name;
+            this.address = address;
+            this.connected = connected;
+        }
+    }
+
+    private static final class BtRow {
+        final String label;
+        final @Nullable BtChoice device;
+
+        BtRow(String label, @Nullable BtChoice device) {
+            this.label = label;
+            this.device = device;
+        }
+    }
+
+    private boolean hasBluetoothConnectPermission() {
+        return Build.VERSION.SDK_INT < 31 || ContextCompat.checkSelfPermission(this,
+                Manifest.permission.BLUETOOTH_CONNECT) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+    }
+
+    private boolean hasBluetoothScanPermission() {
+        if (Build.VERSION.SDK_INT >= 31) {
+            return ContextCompat.checkSelfPermission(this,
+                    Manifest.permission.BLUETOOTH_SCAN) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        }
+        return ContextCompat.checkSelfPermission(this,
+                Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+    }
+
+    private BluetoothAdapter bluetoothAdapter() {
+        BluetoothManager manager = getSystemService(BluetoothManager.class);
+        return manager == null ? null : manager.getAdapter();
+    }
+
+    private boolean isBluetoothOutputConnected() {
+        AudioManager audio = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        if (audio == null) {
+            return false;
+        }
+        for (AudioDeviceInfo device : audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+            int type = device.getType();
+            if (type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
+                    || type == AudioDeviceInfo.TYPE_BLE_HEADSET
+                    || type == AudioDeviceInfo.TYPE_BLE_SPEAKER
+                    || type == AudioDeviceInfo.TYPE_BLE_BROADCAST) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isAudioBluetoothClass(@Nullable BluetoothClass klass) {
+        if (klass == null) {
+            return false;
+        }
+        int major = klass.getMajorDeviceClass();
+        if (major != BluetoothClass.Device.Major.AUDIO_VIDEO) {
+            return false;
+        }
+        int deviceClass = klass.getDeviceClass();
+        return deviceClass == BluetoothClass.Device.AUDIO_VIDEO_HEADPHONES
+                || deviceClass == BluetoothClass.Device.AUDIO_VIDEO_WEARABLE_HEADSET
+                || deviceClass == BluetoothClass.Device.AUDIO_VIDEO_LOUDSPEAKER
+                || deviceClass == BluetoothClass.Device.AUDIO_VIDEO_PORTABLE_AUDIO
+                || deviceClass == BluetoothClass.Device.AUDIO_VIDEO_HIFI_AUDIO
+                || deviceClass == BluetoothClass.Device.AUDIO_VIDEO_CAR_AUDIO
+                || deviceClass == BluetoothClass.Device.AUDIO_VIDEO_HANDSFREE
+                || deviceClass == BluetoothClass.Device.AUDIO_VIDEO_UNCATEGORIZED;
+    }
+
+    private List<String> connectedBluetoothOutputNames() {
+        List<String> connectedNames = new ArrayList<>();
+        AudioManager audio = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        if (audio == null) {
+            return connectedNames;
+        }
+        for (AudioDeviceInfo output : audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+            int type = output.getType();
+            if (type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
+                    || type == AudioDeviceInfo.TYPE_BLE_HEADSET
+                    || type == AudioDeviceInfo.TYPE_BLE_SPEAKER
+                    || type == AudioDeviceInfo.TYPE_BLE_BROADCAST) {
+                CharSequence product = output.getProductName();
+                if (product != null) {
+                    connectedNames.add(product.toString());
+                }
+            }
+        }
+        return connectedNames;
+    }
+
+    private List<BtChoice> bluetoothSavedChoices() {
+        List<BtChoice> choices = new ArrayList<>();
+        BluetoothAdapter adapter = bluetoothAdapter();
+        if (adapter == null || !hasBluetoothConnectPermission()) {
+            return choices;
+        }
+        List<String> connectedNames = connectedBluetoothOutputNames();
+        for (BluetoothDevice device : adapter.getBondedDevices()) {
+            if (!isAudioBluetoothClass(device.getBluetoothClass())) {
+                continue;
+            }
+            String name = device.getName() == null || device.getName().trim().isEmpty()
+                    ? device.getAddress() : device.getName();
+            boolean connected = connectedNames.contains(name);
+            choices.add(new BtChoice(name, device.getAddress(), connected));
+        }
+        return choices;
+    }
+
+    private void openBluetoothSettings() {
+        Intent panel = new Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS);
+        startActivity(panel);
+    }
+
+    private void requestBluetoothPermissions() {
+        if (Build.VERSION.SDK_INT >= 31) {
+            ActivityCompat.requestPermissions(this,
+                    new String[] {Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN},
+                    REQ_BLUETOOTH);
+            return;
+        }
+        ActivityCompat.requestPermissions(this,
+                new String[] {Manifest.permission.ACCESS_FINE_LOCATION}, REQ_BLUETOOTH);
+    }
+
+    private void handleBluetoothChoice(BtChoice selected) {
+        if (selected.connected || isBluetoothOutputConnected()) {
+            new AlertDialog.Builder(this)
+                    .setMessage(R.string.bluetooth_disconnect_confirm)
+                    .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.bluetooth_disconnect,
+                    (confirmDialog, confirmWhich) -> requestBluetoothDisconnect())
+                    .show();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setMessage(getString(R.string.bluetooth_pairing_hint))
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.bluetooth_open_settings,
+                        (confirmDialog, confirmWhich) -> openBluetoothSettings())
+                .show();
+    }
+
+    private void requestBluetoothDisconnect() {
+        // Android does not expose a stable public API to force A2DP disconnects from third-party apps.
+        showStatus(getString(R.string.bluetooth_disconnect_system_required));
+        openBluetoothSettings();
+    }
+
+    private void showBluetoothDeviceChooser(BluetoothAdapter adapter) {
+        List<BtChoice> saved = bluetoothSavedChoices();
+        if (saved.isEmpty()) {
+            new AlertDialog.Builder(this)
+                    .setTitle(R.string.bluetooth_audio_title)
+                    .setMessage(getString(R.string.bluetooth_no_devices) + "\n\n"
+                            + getString(R.string.bluetooth_use_android_search))
+                    .setNegativeButton(R.string.cancel, null)
+                    .setPositiveButton(R.string.bluetooth_open_settings,
+                            (dialog, which) -> openBluetoothSettings())
+                    .show();
+            return;
+        }
+        List<BtRow> rows = new ArrayList<>();
+        List<String> labels = new ArrayList<>();
+        rows.add(new BtRow(getString(R.string.bluetooth_saved_section), null));
+        labels.add(getString(R.string.bluetooth_saved_section));
+        for (BtChoice choice : saved) {
+            String label = choice.connected
+                    ? choice.name + " " + getString(R.string.bluetooth_connected_suffix)
+                    : choice.name;
+            rows.add(new BtRow(label, choice));
+            labels.add(label);
+        }
+
+        android.widget.ArrayAdapter<String> adapterRows = new android.widget.ArrayAdapter<>(
+                this, android.R.layout.simple_list_item_1, labels);
+        ListView list = new ListView(this);
+        list.setAdapter(adapterRows);
+        int pad = (int) (16 * getResources().getDisplayMetrics().density);
+        list.setPadding(pad, pad / 2, pad, 0);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.bluetooth_audio_title)
+                .setView(list)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.bluetooth_open_settings,
+                        (d, which) -> openBluetoothSettings())
+                .create();
+
+        list.setOnItemClickListener((parentView, clicked, position, id) -> {
+            if (position < 0 || position >= rows.size()) {
+                return;
+            }
+            BtRow row = rows.get(position);
+            if (row.device == null) {
+                return;
+            }
+            dialog.dismiss();
+            handleBluetoothChoice(row.device);
+        });
+        dialog.show();
+    }
+
+    private void showBluetoothAudioDialog() {
+        BluetoothAdapter adapter = bluetoothAdapter();
+        if (adapter == null) {
+            showStatus(getString(R.string.bluetooth_not_supported));
+            return;
+        }
+        if (!hasBluetoothConnectPermission() || !hasBluetoothScanPermission()) {
+            requestBluetoothPermissions();
+            return;
+        }
+        if (!adapter.isEnabled()) {
+            showStatus(getString(R.string.bluetooth_enable_first));
+            return;
+        }
+        if (isBluetoothOutputConnected()) {
+            new AlertDialog.Builder(this)
+                    .setTitle(R.string.bluetooth_audio_title)
+                    .setMessage(R.string.bluetooth_disconnect_confirm)
+                    .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.bluetooth_disconnect,
+                    (dialog, which) -> requestBluetoothDisconnect())
+                    .show();
+            return;
+        }
+        // Nearby discovery is delegated to the Android system Bluetooth UI for reliability.
+        openBluetoothSettings();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
+            @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQ_BLUETOOTH) {
+            boolean granted = grantResults.length > 0;
+            for (int value : grantResults) {
+                granted &= value == android.content.pm.PackageManager.PERMISSION_GRANTED;
+            }
+            if (granted) {
+                showBluetoothAudioDialog();
+            } else {
+                showStatus(getString(R.string.bluetooth_permission_needed));
+            }
+        }
     }
 
     private void applyQueueTabVisibility() {
