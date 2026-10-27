@@ -426,6 +426,23 @@ public final class MainActivity extends AppCompatActivity {
         openBluetoothSettings();
     }
 
+    private void applyPlaybackCacheLimit(long bytes) {
+        Settings settings = Settings.get(this);
+        long previous = settings.current().cacheBytes;
+        long normalized = Settings.normalizeCacheBytes(bytes);
+        settings.setCacheBytes(normalized);
+        if (normalized >= previous) {
+            return;
+        }
+        workers.submit(() -> {
+            try {
+                Downloads.get(MainActivity.this).trimPlaybackCache(normalized);
+            } catch (Exception failure) {
+                main.post(() -> showStatus(getString(R.string.cache_clear_failed)));
+            }
+        });
+    }
+
     private void showBluetoothDeviceChooser(BluetoothAdapter adapter) {
         List<BtChoice> saved = bluetoothSavedChoices();
         if (saved.isEmpty()) {
@@ -941,12 +958,17 @@ public final class MainActivity extends AppCompatActivity {
                 .create();
         settingsDialog.setOnShowListener(ignored -> {
             settingsDialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+            final long[] appliedCacheBytes = new long[] {Settings.get(MainActivity.this).current().cacheBytes};
             cacheSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
                 @Override public void onProgressChanged(SeekBar slider, int progress, boolean fromUser) {
                     int selectedGb = progress + 1;
                     cacheValue.setText(getString(R.string.cache_size_value, selectedGb));
                     if (fromUser) {
-                        Settings.get(MainActivity.this).setCacheBytes(selectedGb * 1024L * 1024L * 1024L);
+                        long selectedBytes = selectedGb * 1024L * 1024L * 1024L;
+                        if (selectedBytes != appliedCacheBytes[0]) {
+                            applyPlaybackCacheLimit(selectedBytes);
+                            appliedCacheBytes[0] = selectedBytes;
+                        }
                     }
                 }
 
@@ -1134,12 +1156,17 @@ public final class MainActivity extends AppCompatActivity {
         dialog.setOnShowListener(ignored -> {
             dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
             if (includeCache && finalCacheSlider != null && finalCacheValue != null && finalClearCache != null) {
+                final long[] appliedCacheBytes = new long[] {Settings.get(MainActivity.this).current().cacheBytes};
                 finalCacheSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
                     @Override public void onProgressChanged(SeekBar slider, int progress, boolean fromUser) {
                         int selectedGb = progress + 1;
                         finalCacheValue.setText(getString(R.string.cache_size_value, selectedGb));
                         if (fromUser) {
-                            Settings.get(MainActivity.this).setCacheBytes(selectedGb * 1024L * 1024L * 1024L);
+                            long selectedBytes = selectedGb * 1024L * 1024L * 1024L;
+                            if (selectedBytes != appliedCacheBytes[0]) {
+                                applyPlaybackCacheLimit(selectedBytes);
+                                appliedCacheBytes[0] = selectedBytes;
+                            }
                         }
                     }
 
@@ -1324,9 +1351,10 @@ public final class MainActivity extends AppCompatActivity {
             if (selected.getItemId() == 2 && (state == null || state.state == Download.STATE_COMPLETED)) {
                 new AlertDialog.Builder(this).setMessage(R.string.remove_downloads_question)
                         .setNegativeButton(R.string.cancel, null)
-                        .setPositiveButton(R.string.remove_download, (dialog, which) -> download(entry.mediaId, true)).show();
+                        .setPositiveButton(R.string.remove_download,
+                                (dialog, which) -> download(entry.mediaId, true, false)).show();
             } else {
-                download(entry.mediaId, selected.getItemId() == 2);
+                download(entry.mediaId, selected.getItemId() == 2, false);
             }
             return true;
         });
@@ -1339,7 +1367,7 @@ public final class MainActivity extends AppCompatActivity {
                     .setMessage(R.string.cancel_download_collection_question)
                     .setNegativeButton(R.string.cancel, null)
                     .setPositiveButton(R.string.cancel_download,
-                            (dialog, which) -> download(entry.mediaId, true))
+                            (dialog, which) -> download(entry.mediaId, true, false))
                     .show();
             return;
         }
@@ -1348,25 +1376,25 @@ public final class MainActivity extends AppCompatActivity {
                     .setMessage(R.string.remove_download_collection_question)
                     .setNegativeButton(R.string.cancel, null)
                     .setPositiveButton(R.string.remove_download,
-                            (dialog, which) -> download(entry.mediaId, true))
+                            (dialog, which) -> download(entry.mediaId, true, false))
                     .show();
             return;
         }
-        download(entry.mediaId, false);
+        download(entry.mediaId, false, false);
     }
 
-    private void download(String id, boolean remove) {
+    private void download(String id, boolean remove, boolean allowMobileOnce) {
         if (downloads == null) { return; }
         boolean removing = remove;
         if (!remove && !Settings.get(this).current().configured) { showLogin(true); return; }
-        if (!remove && !Settings.get(this).current().allowMobileDownloads && downloads.onMobileData()) {
+        boolean collectionHasMobileOverride = !remove && downloads.isTemporaryMobileDataEnabled(id);
+        if (!remove && !allowMobileOnce && !collectionHasMobileOverride
+            && !Settings.get(this).current().allowMobileDownloads && downloads.onMobileData()) {
             new AlertDialog.Builder(this)
                     .setMessage(R.string.mobile_download_confirm)
                     .setNegativeButton(R.string.cancel, null)
                     .setPositiveButton(R.string.download, (dialog, which) -> {
-                        Settings.get(MainActivity.this).setAllowMobileDownloads(true);
-                        downloads.applyNetworkPolicy();
-                        download(id, false);
+                        download(id, false, true);
                     })
                     .show();
             return;
@@ -1383,6 +1411,7 @@ public final class MainActivity extends AppCompatActivity {
                     if (Downloads.isSyncableCollectionId(id)) {
                         downloads.setCollectionAutoSync(id, false);
                     }
+                    downloads.disableTemporaryMobileData(id);
                     downloads.remove(ids);
                 };
             }
@@ -1392,7 +1421,7 @@ public final class MainActivity extends AppCompatActivity {
                 if (Downloads.isSyncableCollectionId(id)) {
                     downloads.setCollectionAutoSync(id, true);
                 }
-                downloads.add(requests);
+                downloads.add(requests, id, allowMobileOnce);
             };
         });
         Futures.addCallback(prepared, new FutureCallback<Runnable>() {

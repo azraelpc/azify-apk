@@ -59,6 +59,8 @@ again to the same server. Public servers do not show Sign out.
 Use **Settings** from the top bar to adjust local behavior:
 
 - **Cache**: playback cache size (1-10 GB) and **Clear cache** action.
+   Lowering the limit trims cached playback items immediately, removing the
+   least-recently-used entries first (it does not wipe everything).
 - **Downloads over mobile data**: disabled by default (Wi-Fi only). You can
   enable it in Settings. If disabled and you start a download on mobile data,
   the app asks for confirmation before enabling mobile downloads.
@@ -121,7 +123,8 @@ The foreground download notification now includes the active collection name
 
 By default, downloads run on **Wi-Fi only**. If mobile downloads are disabled
 and the device is on mobile data, starting a download prompts for explicit
-confirmation.
+confirmation for that download only. It does not automatically enable the
+global **Allow mobile data for downloads** setting.
 
 **Downloads** lists requested tracks, including those still in progress. Completed
 tracks are stored persistently in the app's private files, not temporary OS cache.

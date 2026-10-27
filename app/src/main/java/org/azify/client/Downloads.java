@@ -42,6 +42,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Comparator;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.ExecutorService;
@@ -87,6 +88,7 @@ final class Downloads {
     private final Set<String> watchedCollections = ConcurrentHashMap.newKeySet();
     private final Set<String> announcedCollections = ConcurrentHashMap.newKeySet();
     private final Set<String> prefetching = ConcurrentHashMap.newKeySet();
+    private final Set<String> temporaryMobileCollections = ConcurrentHashMap.newKeySet();
     private String cachedCatalogServer;
     private Catalog cachedCatalog;
 
@@ -166,6 +168,33 @@ final class Downloads {
         watchedCollections.add(key);
         announcedCollections.remove(key);
         changed();
+    }
+
+    private static String normalizedCollectionId(String id) {
+        return id != null && id.startsWith(Catalog.OFFLINE) ? id.substring(Catalog.OFFLINE.length()) : id;
+    }
+
+    void enableTemporaryMobileData(String id) {
+        String key = normalizedCollectionId(id);
+        if (key == null || key.isEmpty()) {
+            return;
+        }
+        temporaryMobileCollections.add(key);
+        applyNetworkPolicy();
+    }
+
+    boolean isTemporaryMobileDataEnabled(String id) {
+        String key = normalizedCollectionId(id);
+        return key != null && temporaryMobileCollections.contains(key);
+    }
+
+    void disableTemporaryMobileData(String id) {
+        String key = normalizedCollectionId(id);
+        if (key == null || key.isEmpty()) {
+            return;
+        }
+        temporaryMobileCollections.remove(key);
+        applyNetworkPolicy();
     }
 
     static boolean isSyncableCollectionId(String id) {
@@ -360,6 +389,8 @@ final class Downloads {
                 showFinishedNotification(title);
                 announcedCollections.add(id);
                 watchedCollections.remove(id);
+                temporaryMobileCollections.remove(id);
+                applyNetworkPolicy();
             } catch (IOException ignored) {
                 // Retry next update.
             }
@@ -403,7 +434,7 @@ final class Downloads {
     }
 
     void applyNetworkPolicy() {
-        boolean allowMobile = settings.current().allowMobileDownloads;
+        boolean allowMobile = settings.current().allowMobileDownloads || !temporaryMobileCollections.isEmpty();
         int requiredNetwork = allowMobile ? Requirements.NETWORK : Requirements.NETWORK_UNMETERED;
         manager.setRequirements(new Requirements(requiredNetwork));
     }
@@ -541,6 +572,13 @@ final class Downloads {
         }
     }
 
+    void add(List<DownloadRequest> requests, @Nullable String collectionId, boolean allowMobileOnce) {
+        if (allowMobileOnce && collectionId != null) {
+            enableTemporaryMobileData(collectionId);
+        }
+        add(requests);
+    }
+
     void remove(List<String> ids) {
         for (String id : ids) {
             DownloadService.sendRemoveDownload(context, MusicDownloadService.class, id, true);
@@ -559,6 +597,49 @@ final class Downloads {
     synchronized void clearPlaybackCache() throws IOException {
         for (String key : new ArrayList<>(playbackCache.getKeys())) {
             playbackCache.removeResource(key);
+        }
+    }
+
+    synchronized void trimPlaybackCache(long maxBytes) throws IOException {
+        long target = Settings.normalizeCacheBytes(maxBytes);
+        long current = playbackCache.getCacheSpace();
+        if (current <= target) {
+            return;
+        }
+
+        final class CachedResource {
+            final String key;
+            final long bytes;
+            final long lastTouch;
+
+            CachedResource(String key, long bytes, long lastTouch) {
+                this.key = key;
+                this.bytes = bytes;
+                this.lastTouch = lastTouch;
+            }
+        }
+
+        List<CachedResource> resources = new ArrayList<>();
+        for (String key : new ArrayList<>(playbackCache.getKeys())) {
+            long bytes = 0L;
+            long lastTouch = Long.MAX_VALUE;
+            for (androidx.media3.datasource.cache.CacheSpan span : playbackCache.getCachedSpans(key)) {
+                bytes += Math.max(0L, span.length);
+                if (span.lastTouchTimestamp >= 0 && span.lastTouchTimestamp < lastTouch) {
+                    lastTouch = span.lastTouchTimestamp;
+                }
+            }
+            if (bytes > 0L) {
+                resources.add(new CachedResource(key, bytes, lastTouch));
+            }
+        }
+        resources.sort(Comparator.comparingLong(left -> left.lastTouch));
+        for (CachedResource resource : resources) {
+            if (current <= target) {
+                break;
+            }
+            playbackCache.removeResource(resource.key);
+            current = playbackCache.getCacheSpace();
         }
     }
 
