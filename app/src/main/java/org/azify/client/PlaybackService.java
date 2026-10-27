@@ -60,6 +60,7 @@ public final class PlaybackService extends MediaLibraryService {
     private Downloads downloads;
     private SharedPreferences resume;
     private PendingIntent openApp;
+    private volatile boolean shuffleEnabledSnapshot;
     private final Runnable downloadsChanged = () -> {
         if (session != null) { session.notifyChildrenChanged(Catalog.DOWNLOADS, Integer.MAX_VALUE, null); }
     };
@@ -90,9 +91,16 @@ public final class PlaybackService extends MediaLibraryService {
                 .build();
         player.setRepeatMode(resume.getInt("repeat", Player.REPEAT_MODE_ALL));
         player.setShuffleModeEnabled(resume.getBoolean("shuffle", false));
+        shuffleEnabledSnapshot = player.getShuffleModeEnabled();
         player.addListener(new Player.Listener() {
             @Override public void onEvents(Player current, Player.Events events) {
                 savePosition();
+                if (events.contains(Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED)) {
+                    shuffleEnabledSnapshot = current.getShuffleModeEnabled();
+                    if (shuffleEnabledSnapshot) {
+                        scopeShuffleToCurrentFolder();
+                    }
+                }
                 if (events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)
                         || events.contains(Player.EVENT_TIMELINE_CHANGED)
                         || events.contains(Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED)
@@ -235,12 +243,91 @@ public final class PlaybackService extends MediaLibraryService {
         downloads.prefetchUpcoming(urls);
     }
 
-    private MediaSession.MediaItemsWithStartPosition queue(Catalog catalog, String id, long position) {
-        int index = catalog.startIndex(id);
-        if (index < 0) {
+    @Nullable
+    private static String folderScopeFromTrackId(String mediaId) {
+        if (mediaId == null || mediaId.isEmpty()) {
+            return null;
+        }
+        String id = mediaId.startsWith(Catalog.OFFLINE)
+                ? mediaId.substring(Catalog.OFFLINE.length()) : mediaId;
+        if (!id.startsWith("track:")) {
+            return null;
+        }
+        String path = id.substring("track:".length());
+        if (!path.startsWith("/music/")) {
+            return null;
+        }
+        int lastSlash = path.lastIndexOf('/');
+        if (lastSlash <= "/music".length()) {
+            return Catalog.FOLDERS;
+        }
+        return Catalog.FOLDERS + path.substring("/music/".length(), lastSlash);
+    }
+
+    private void scopeShuffleToCurrentFolder() {
+        if (player == null || player.getCurrentMediaItem() == null) {
+            return;
+        }
+        MediaItem current = player.getCurrentMediaItem();
+        String currentId = current == null ? "" : current.mediaId;
+        String scopeId = folderScopeFromTrackId(currentId);
+        if (scopeId == null) {
+            return;
+        }
+        long positionMs = Math.max(0, player.getCurrentPosition());
+        boolean offline = currentId.startsWith(Catalog.OFFLINE);
+        catalogExecutor.submit(() -> {
+            try {
+                Catalog catalog = offline ? downloads.library(true) : repository.get();
+                List<Catalog.Entry> tracks = catalog.tracksUnder(scopeId);
+                if (tracks.isEmpty()) {
+                    return;
+                }
+                int start = 0;
+                String plainCurrentId = currentId.startsWith(Catalog.OFFLINE)
+                        ? currentId.substring(Catalog.OFFLINE.length()) : currentId;
+                for (int i = 0; i < tracks.size(); i++) {
+                    if (plainCurrentId.equals(tracks.get(i).id)) {
+                        start = i;
+                        break;
+                    }
+                }
+                List<MediaItem> queue = items(tracks);
+                int startIndex = start;
+                main.post(() -> {
+                    if (player == null || player.getCurrentMediaItem() == null
+                            || !player.getCurrentMediaItem().mediaId.equals(currentId)
+                            || !player.getShuffleModeEnabled()) {
+                        return;
+                    }
+                    player.setMediaItems(queue, startIndex, positionMs);
+                    player.prepare();
+                    player.play();
+                });
+            } catch (IOException ignored) {
+                // Keep existing queue if catalog is unavailable.
+            }
+        });
+    }
+
+    private MediaSession.MediaItemsWithStartPosition queue(Catalog catalog, String id,
+            long position, boolean shuffleEnabled) {
+        Catalog.Entry target = catalog.get(id);
+        List<Catalog.Entry> scopedTracks = shuffleEnabled && target != null
+                && target.kind != Catalog.Kind.TRACK ? catalog.tracksUnder(id) : catalog.tracks();
+        if (scopedTracks.isEmpty()) {
             throw new IllegalArgumentException("This track is unavailable or the library is empty.");
         }
-        return new MediaSession.MediaItemsWithStartPosition(items(catalog.tracks()), index,
+        int index = catalog.startIndex(id);
+        if (shuffleEnabled && target != null && target.kind != Catalog.Kind.TRACK) {
+            index = 0;
+        } else if (target != null && target.kind == Catalog.Kind.TRACK) {
+            index = Math.max(0, catalog.startIndex(id));
+        }
+        if (index < 0) {
+            index = 0;
+        }
+        return new MediaSession.MediaItemsWithStartPosition(items(scopedTracks), index,
                 position == C.TIME_UNSET ? 0 : Math.max(0, position));
     }
 
@@ -363,14 +450,16 @@ public final class PlaybackService extends MediaLibraryService {
             return catalogExecutor.submit(() -> {
                 if (requested.size() == 1 && requested.get(0).mediaId.startsWith(Catalog.OFFLINE)) {
                     return queue(downloads.library(true),
-                            requested.get(0).mediaId.substring(Catalog.OFFLINE.length()), startPositionMs);
+                            requested.get(0).mediaId.substring(Catalog.OFFLINE.length()), startPositionMs,
+                            shuffleEnabledSnapshot);
                 }
                 if (requested.isEmpty()) {
                     return new MediaSession.MediaItemsWithStartPosition(ImmutableList.of(), 0, 0);
                 }
                 Catalog catalog = repository.get();
                 if (requested.size() == 1) {
-                    return queue(catalog, resolveId(catalog, requested.get(0)), startPositionMs);
+                    return queue(catalog, resolveId(catalog, requested.get(0)), startPositionMs,
+                            shuffleEnabledSnapshot);
                 }
                 boolean hasOffline = false;
                 for (MediaItem request : requested) {
@@ -419,8 +508,9 @@ public final class PlaybackService extends MediaLibraryService {
             long position = resume.getLong("position", 0);
             return catalogExecutor.submit(() -> {
                 Catalog catalog = repository.get();
-                return catalog.startIndex(id) < 0 ? queue(catalog, Catalog.ALL, 0)
-                        : queue(catalog, id, position);
+                return catalog.startIndex(id) < 0
+                    ? queue(catalog, Catalog.ALL, 0, shuffleEnabledSnapshot)
+                    : queue(catalog, id, position, shuffleEnabledSnapshot);
             });
         }
 

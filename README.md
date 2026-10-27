@@ -73,6 +73,13 @@ the Settings dialog.
 
 - Albums, nested folders, tracks, search, and a shared playback queue.
 - Play/pause, previous/next, seeking, ten-second skips, shuffle and repeat.
+- With shuffle enabled, playback is randomized inside the current collection
+   (album/folder) and loops within that collection.
+- If shuffle is enabled while a song is already playing, the queue is
+   re-scoped to the current song folder before applying random order.
+- With shuffle disabled, playback continues in normal order and, after the last
+   track of the current album/folder, moves into the first track of the next
+   album/folder.
 - Background playback, audio focus and pause when headphones are disconnected.
 - Phone, notification, headset and Android Auto controls use one Media3 session.
 - The last track and playback position are saved for playback resumption.
@@ -225,3 +232,57 @@ the generated distributable in `APK/` is safe to share after review.
 
 The upstream GitHub link identifies the compatible server project. It is not a
 preconfigured server or bundled account.
+
+## Technical Notes
+
+### Stack and Architecture
+
+- Platform: native Android app (Java), package `org.azify.client`.
+- Minimum Android: 8.0 (API 26). Target/compile SDK: 35.
+- Media stack: AndroidX Media3 (`MediaLibraryService`, `MediaSession`, ExoPlayer,
+   DownloadManager/DownloadService).
+- Networking: OkHttp (`okhttp`) for catalog/media access and request control.
+- UI: XML layouts + AppCompat widgets (no WebView).
+- Offline model: persistent manual downloads + separate playback LRU cache.
+
+### Build Toolchain
+
+- Android Gradle Plugin: 8.9.1.
+- Gradle wrapper: 8.11.1 (SHA-256 verified by wrapper config).
+- Java language level: 17 (source and target compatibility).
+- Primary module: `:app` (application project, no Kotlin source in this repo).
+
+### Main Libraries
+
+- `androidx.appcompat:appcompat:1.7.0`
+- `androidx.media3:media3-exoplayer:1.6.1`
+- `androidx.media3:media3-session:1.6.1`
+- `androidx.media3:media3-ui:1.6.1`
+- `androidx.media3:media3-datasource-okhttp:1.6.1`
+- `androidx.media3:media3-database:1.6.1`
+- `com.squareup.okhttp3:okhttp:4.12.0`
+
+### Test and Validation Tooling
+
+- Local unit tests: JUnit 4 + Robolectric + MockWebServer.
+- Android instrumentation tests: AndroidX Test Runner/Core/JUnit extensions.
+- Static checks in normal pipeline: Android Lint.
+- Typical Gradle task set: `testDebugUnitTest lintDebug assembleDebug`.
+
+### Build and Packaging Flow
+
+- Regular local build entrypoint: `scripts/build.ps1`.
+- Scripted environment bootstrap (Windows):
+   - installs/uses JDK 17 (Adoptium) in `.tools/`
+   - installs Android command-line tools + SDK platform 35 + build-tools 35.0.0
+   - runs Gradle tasks without requiring global Android Studio setup
+- On successful `assembleDebug`, the app archives a date-stamped APK copy to
+   `APK/Azify-DDMMYY.apk` while keeping Gradle output at
+   `app/build/outputs/apk/debug/app-debug.apk`.
+
+### Repository and Runtime Notes
+
+- Dependency repositories: `google()` and `mavenCentral()`.
+- Repositories mode: fail on project-defined repositories
+   (`RepositoriesMode.FAIL_ON_PROJECT_REPOS`).
+- English-only app resources are enforced with `resourceConfigurations += ['en']`.

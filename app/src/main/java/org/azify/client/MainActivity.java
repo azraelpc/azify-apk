@@ -181,7 +181,7 @@ public final class MainActivity extends AppCompatActivity {
                     load();
                 }
             } else {
-                if (isFolderTrackView()) {
+                if (isCollectionTrackView() && browser != null && browser.getShuffleModeEnabled()) {
                     playInVisibleOrder(selected.mediaId);
                 } else {
                     play(selected.mediaId);
@@ -268,8 +268,12 @@ public final class MainActivity extends AppCompatActivity {
         }
     }
 
-    private boolean isFolderTrackView() {
-        return parent.startsWith(Catalog.FOLDERS) || parent.startsWith(Catalog.OFFLINE + Catalog.FOLDERS);
+    private boolean isCollectionTrackView() {
+        return parent.startsWith(Catalog.FOLDERS)
+                || parent.startsWith(Catalog.ALBUMS)
+                || parent.startsWith("album:")
+                || parent.startsWith(Catalog.OFFLINE + Catalog.FOLDERS)
+                || parent.startsWith(Catalog.OFFLINE + "album:");
     }
 
     private void playInVisibleOrder(String selectedId) {
