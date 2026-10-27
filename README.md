@@ -5,7 +5,8 @@ including Android Auto media browsing and persistent offline downloads.
 Requires Android 8.0 or later. The interface and documentation are in English.
 No server, account, password or personal library is included in the APK.
 
-<img height="600" alt="image" src="https://github.com/user-attachments/assets/bdb35b83-af75-4550-ba2e-3b460d475258" /> <img height="600" alt="image" src="https://github.com/user-attachments/assets/d5f0c81e-d64d-461e-9efc-627f5690033f" />
+<img height="600" alt="image" src="https://github.com/user-attachments/assets/c8950aaf-1b76-45cf-b023-f8437379c6ce" />
+ <img height="600" alt="image" src="https://github.com/user-attachments/assets/d5f0c81e-d64d-461e-9efc-627f5690033f" />
 
 ## Connect
 
