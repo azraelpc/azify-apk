@@ -189,6 +189,7 @@ public final class MainActivity extends AppCompatActivity {
                     history.add(parent);
                     parent = selected.mediaId;
                     search.setText("");
+                    updateFolderBackVisibility();
                     load();
                 }
             } else {
@@ -202,6 +203,7 @@ public final class MainActivity extends AppCompatActivity {
         findViewById(R.id.settings).setOnClickListener(view -> showSettings());
         findViewById(R.id.sign_out).setOnClickListener(view -> signOut());
         updateSessionUi();
+        findViewById(R.id.folder_back).setOnClickListener(view -> goBack());
         findViewById(R.id.refresh).setOnClickListener(view -> refresh(false));
         findViewById(R.id.bluetooth_audio).setOnClickListener(view -> showBluetoothAudioDialog());
         RadioGroup tabs = findViewById(R.id.tabs);
@@ -212,6 +214,7 @@ public final class MainActivity extends AppCompatActivity {
             history.clear();
             search.setText("");
             search.setVisibility(queueView ? View.GONE : View.VISIBLE);
+            updateFolderBackVisibility();
             load();
         });
         search.addTextChangedListener(new TextWatcher() {
@@ -243,6 +246,7 @@ public final class MainActivity extends AppCompatActivity {
             }
             search.setText(state.getString("query", ""));
         }
+        updateFolderBackVisibility();
         applyQueueTabVisibility();
     }
 
@@ -534,6 +538,17 @@ public final class MainActivity extends AppCompatActivity {
             queueView = false;
             parent = Catalog.ALBUMS;
         }
+        updateFolderBackVisibility();
+    }
+
+    private void updateFolderBackVisibility() {
+        View back = findViewById(R.id.folder_back);
+        if (back == null) {
+            return;
+        }
+        RadioGroup tabs = findViewById(R.id.tabs);
+        boolean inSongs = tabs != null && tabs.getCheckedRadioButtonId() == R.id.tab_folders;
+        back.setVisibility(inSongs && !history.isEmpty() ? View.VISIBLE : View.GONE);
     }
 
     private boolean isCollectionTrackView() {
@@ -682,6 +697,7 @@ public final class MainActivity extends AppCompatActivity {
         if (!history.isEmpty()) {
             parent = history.remove(history.size() - 1);
             search.setText("");
+            updateFolderBackVisibility();
             load();
         }
     }
@@ -920,7 +936,7 @@ public final class MainActivity extends AppCompatActivity {
         settingsDialog = new AlertDialog.Builder(this)
                 .setTitle(R.string.settings)
                 .setView(scroll)
-                .setNegativeButton(R.string.cancel, null)
+            .setNegativeButton(R.string.back, null)
                 .setPositiveButton(R.string.connect, (dialog, which) -> showLogin())
                 .create();
         settingsDialog.setOnShowListener(ignored -> {

@@ -66,6 +66,7 @@ Use **Settings** from the top bar to adjust local behavior:
    for **Today** and **Last 7 days**.
 - **Debug**: **Show downloaded MP3 list**, including merged source labels
    (USER, CACHE, USER+CACHE).
+- Settings closes with **Back** (instead of Cancel) for clearer navigation.
 
 The Connect dialog is separate from Settings and is opened with **Connect** from
 the Settings dialog.
@@ -81,6 +82,8 @@ the Settings dialog.
 - With shuffle disabled, playback continues in normal order and, after the last
    track of the current album/folder, moves into the first track of the next
    album/folder.
+- In **Songs** tab, when you are inside nested folders, a header button
+   (**Back to Folder List**) appears to move one level up in the folder history.
 - Background playback, audio focus and pause when headphones are disconnected.
 - Phone, notification, headset and Android Auto controls use one Media3 session.
 - The last track and playback position are saved for playback resumption.

@@ -33,6 +33,7 @@
     <string name="queue">Queue</string>
     <string name="search">Search albums and tracks</string>
     <string name="back">Back</string>
+    <string name="back_to_folder_list">Back to Folder List</string>
     <string name="play_all">Play all</string>
     <string name="play_album">Play album</string>
     <string name="nothing_playing">Nothing playing</string>
