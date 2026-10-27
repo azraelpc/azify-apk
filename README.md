@@ -88,7 +88,9 @@ the Settings dialog.
    pairing devices (same behavior as system Settings).
 - The app view shows/manage **Saved Bluetooth devices** (paired devices).
 - If audio is already connected, tapping the Bluetooth icon first offers a
-   disconnect confirmation flow.
+   **Disconnect / Cancel** confirmation flow.
+- Choosing **Disconnect** opens system Bluetooth settings to complete the
+   disconnection (required by Android platform restrictions).
 - Device connect/disconnect actions are finalized in system Bluetooth settings.
 - If pairing asks for a PIN/passkey, common defaults are suggested
    (`0000`, `1234`, `8888`, `1111`, `9999`, `000000`, `123456`).
