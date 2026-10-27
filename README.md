@@ -17,6 +17,7 @@ supported, for example:
 - `https://example.com/`
 - `https://example.com:8443/azify/`
 - `http://192.0.2.10:5155/`
+- `http://azify.michaelknight.de/`
 - `http://example.com:5155/apps/music/`
 
 A URL without scheme is also accepted. The app first tries `https://` and then
