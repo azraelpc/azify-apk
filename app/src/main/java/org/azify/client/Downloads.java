@@ -55,6 +55,18 @@ final class Downloads {
     static final int COLLECTION_ACTIVE = 1;
     static final int COLLECTION_DONE = 2;
 
+    static final class CollectionProgress {
+        final String title;
+        final int completed;
+        final int total;
+
+        CollectionProgress(String title, int completed, int total) {
+            this.title = title;
+            this.completed = completed;
+            this.total = total;
+        }
+    }
+
     private static Downloads instance;
     private static final String SYNC_PREFS = "download-sync";
     private static final String SYNC_COLLECTIONS = "collections";
@@ -278,6 +290,56 @@ final class Downloads {
         } catch (IOException failure) {
             return COLLECTION_NONE;
         }
+    }
+
+    @Nullable
+    CollectionProgress activeCollectionProgress() {
+        Settings.Snapshot account = settings.current();
+        if ((!account.configured && !account.offlineAuthorized) || account.server.isEmpty()) {
+            return null;
+        }
+        Catalog catalog;
+        try {
+            catalog = savedCatalog(account.server);
+        } catch (IOException failure) {
+            return null;
+        }
+
+        Set<String> candidates = new java.util.LinkedHashSet<>();
+        candidates.addAll(watchedCollections);
+        candidates.addAll(subscribedCollections());
+        for (String id : candidates) {
+            Catalog.Entry entry = catalog.get(id);
+            if (entry == null || !isSyncableCollectionId(id)) {
+                continue;
+            }
+            List<Catalog.Entry> tracks = catalog.tracksUnder(id);
+            if (tracks.isEmpty()) {
+                continue;
+            }
+            int completedCount = 0;
+            boolean active = false;
+            for (Catalog.Entry track : tracks) {
+                if (track.url == null) {
+                    continue;
+                }
+                if (completed(track.url)) {
+                    completedCount++;
+                    continue;
+                }
+                Download state = states.get(track.url);
+                if (state != null && (state.state == Download.STATE_DOWNLOADING
+                        || state.state == Download.STATE_QUEUED
+                        || state.state == Download.STATE_RESTARTING
+                        || state.state == Download.STATE_STOPPED)) {
+                    active = true;
+                }
+            }
+            if (active) {
+                return new CollectionProgress(entry.title, completedCount, tracks.size());
+            }
+        }
+        return null;
     }
 
     private void checkCollectionCompletions() {

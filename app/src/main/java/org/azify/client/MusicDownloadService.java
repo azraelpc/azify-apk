@@ -32,6 +32,12 @@ public final class MusicDownloadService extends DownloadService {
                 total += Math.max(0, download.getPercentDownloaded());
             }
         }
+        Downloads.CollectionProgress collection = Downloads.get(this).activeCollectionProgress();
+        String content = getString(notMetRequirements == 0 ? R.string.downloading : R.string.download_waiting);
+        if (notMetRequirements == 0 && collection != null && collection.total > 0) {
+            content = getString(R.string.downloading_collection_progress,
+                collection.title, Math.max(0, Math.min(collection.completed, collection.total)), collection.total);
+        }
         PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class),
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         PendingIntent pause = PendingIntent.getService(this, 1,
@@ -39,7 +45,7 @@ public final class MusicDownloadService extends DownloadService {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         return new NotificationCompat.Builder(this, CHANNEL)
                 .setSmallIcon(android.R.drawable.stat_sys_download).setContentTitle(getString(R.string.downloads))
-                .setContentText(getString(notMetRequirements == 0 ? R.string.downloading : R.string.download_waiting))
+            .setContentText(content)
                 .setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true)
                 .setProgress(100, count == 0 ? 0 : Math.round(total / count), count == 0)
                 .addAction(android.R.drawable.ic_media_pause, getString(R.string.pause_downloads), pause).build();

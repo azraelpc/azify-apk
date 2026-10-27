@@ -58,6 +58,9 @@ again to the same server. Public servers do not show Sign out.
 Use **Settings** from the top bar to adjust local behavior:
 
 - **Cache**: playback cache size (1-10 GB) and **Clear cache** action.
+- **Downloads over mobile data**: disabled by default (Wi-Fi only). You can
+  enable it in Settings. If disabled and you start a download on mobile data,
+  the app asks for confirmation before enabling mobile downloads.
 - **Bandwidth usage**: downloaded bytes split by **Wi-Fi** and **Mobile data**
    for **Today** and **Last 7 days**.
 - **Debug**: **Show downloaded MP3 list**, including merged source labels
@@ -84,7 +87,15 @@ Use the download icon beside an album, folder or track to download it. Progress,
 queued, paused, failed and downloaded states appear in the track list. Tapping
 the icon lets you start, cancel or remove downloads directly depending on the
 current state. Allow notifications to see background download progress and
-completion alerts. Downloads use the current network, including mobile data.
+completion alerts.
+
+The foreground download notification now includes the active collection name
+(album/folder) and progress count, for example:
+`Downloading: Queen - Hits (13/17)`.
+
+By default, downloads run on **Wi-Fi only**. If mobile downloads are disabled
+and the device is on mobile data, starting a download prompts for explicit
+confirmation.
 
 **Downloads** lists requested tracks, including those still in progress. Completed
 tracks are stored persistently in the app's private files, not temporary OS cache.
@@ -97,6 +108,12 @@ Partial downloads are resumed by Media3. Pending downloads can be resumed by
 selecting Download again; if an unsaved password was lost when Android killed
 the process, sign in before retrying. Android battery restrictions and foreground
 service time limits can interrupt long-running downloads.
+
+When you download an album/folder, the app keeps it synchronized with the server
+catalog: new tracks added by the admin are queued automatically, and tracks that
+disappear from the server are removed from managed offline downloads for that
+collection. This sync follows your current download network policy (Wi-Fi only
+or Wi-Fi + mobile data).
 
 When playback loses connectivity while streaming, the app shows a waiting state
 and automatically resumes once the connection returns.
