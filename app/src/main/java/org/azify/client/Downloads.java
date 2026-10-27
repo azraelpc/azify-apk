@@ -2,6 +2,7 @@ package org.azify.client;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.ConnectivityManager;
 import android.net.NetworkCapabilities;
 import android.net.Uri;
@@ -27,6 +28,7 @@ import androidx.media3.exoplayer.offline.DownloadCursor;
 import androidx.media3.exoplayer.offline.DownloadManager;
 import androidx.media3.exoplayer.offline.DownloadRequest;
 import androidx.media3.exoplayer.offline.DownloadService;
+import androidx.media3.exoplayer.scheduler.Requirements;
 
 import org.json.JSONException;
 
@@ -54,6 +56,8 @@ final class Downloads {
     static final int COLLECTION_DONE = 2;
 
     private static Downloads instance;
+    private static final String SYNC_PREFS = "download-sync";
+    private static final String SYNC_COLLECTIONS = "collections";
     private final Context context;
     private final Settings settings;
     private final SimpleCache downloadCache;
@@ -100,6 +104,7 @@ final class Downloads {
         });
         manager = new DownloadManager(context, database, downloadCache, upstream, downloadWorkers);
         manager.setMaxParallelDownloads(6);
+        applyNetworkPolicy();
         manager.addListener(new DownloadManager.Listener() {
             @Override public void onInitialized(DownloadManager current) {
                 disk.execute(() -> {
@@ -149,6 +154,98 @@ final class Downloads {
         watchedCollections.add(key);
         announcedCollections.remove(key);
         changed();
+    }
+
+    static boolean isSyncableCollectionId(String id) {
+        if (id == null) {
+            return false;
+        }
+        String key = id.startsWith(Catalog.OFFLINE) ? id.substring(Catalog.OFFLINE.length()) : id;
+        return key.startsWith("album:") || key.startsWith(Catalog.FOLDERS);
+    }
+
+    void setCollectionAutoSync(String id, boolean enabled) {
+        if (!isSyncableCollectionId(id)) {
+            return;
+        }
+        String key = id.startsWith(Catalog.OFFLINE) ? id.substring(Catalog.OFFLINE.length()) : id;
+        SharedPreferences prefs = context.getSharedPreferences(SYNC_PREFS, Context.MODE_PRIVATE);
+        Set<String> subscribed = new HashSet<>(prefs.getStringSet(SYNC_COLLECTIONS, Collections.emptySet()));
+        if (enabled) {
+            subscribed.add(key);
+        } else {
+            subscribed.remove(key);
+        }
+        prefs.edit().putStringSet(SYNC_COLLECTIONS, subscribed).apply();
+    }
+
+    private Set<String> subscribedCollections() {
+        SharedPreferences prefs = context.getSharedPreferences(SYNC_PREFS, Context.MODE_PRIVATE);
+        return new HashSet<>(prefs.getStringSet(SYNC_COLLECTIONS, Collections.emptySet()));
+    }
+
+    synchronized void syncSubscribedCollections(Catalog latest) {
+        Settings.Snapshot account = settings.current();
+        if (!account.configured) {
+            return;
+        }
+        Set<String> subscribed = subscribedCollections();
+        if (subscribed.isEmpty()) {
+            return;
+        }
+        Catalog previous = null;
+        try {
+            previous = savedCatalog(account.server);
+        } catch (IOException ignored) {
+            // No previous catalog means first sync pass.
+        }
+
+        Set<String> desired = new HashSet<>();
+        Set<String> removed = new HashSet<>();
+        for (String id : subscribed) {
+            for (Catalog.Entry track : latest.tracksUnder(id)) {
+                if (track.url != null) {
+                    desired.add(track.url);
+                }
+            }
+            if (previous != null) {
+                Set<String> oldUrls = new HashSet<>();
+                for (Catalog.Entry track : previous.tracksUnder(id)) {
+                    if (track.url != null) {
+                        oldUrls.add(track.url);
+                    }
+                }
+                oldUrls.removeAll(desired);
+                removed.addAll(oldUrls);
+            }
+        }
+
+        List<DownloadRequest> additions = new ArrayList<>();
+        for (String url : desired) {
+            if (completed(url)) {
+                continue;
+            }
+            Download state = states.get(url);
+            if (state != null && state.state != Download.STATE_FAILED && state.state != Download.STATE_STOPPED) {
+                continue;
+            }
+            additions.add(new DownloadRequest.Builder(url, Uri.parse(url))
+                    .setCustomCacheKey(url).build());
+        }
+
+        List<String> removals = new ArrayList<>();
+        for (String url : removed) {
+            if (states.containsKey(url)) {
+                removals.add(url);
+            }
+        }
+
+        if (!removals.isEmpty()) {
+            remove(removals);
+        }
+        if (!additions.isEmpty()) {
+            add(additions);
+        }
     }
 
     int collectionState(String id) {
@@ -232,6 +329,21 @@ final class Downloads {
         ConnectivityManager connectivity = context.getSystemService(ConnectivityManager.class);
         NetworkCapabilities capabilities = connectivity.getNetworkCapabilities(connectivity.getActiveNetwork());
         return capabilities != null && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+    }
+
+    boolean onMobileData() {
+        ConnectivityManager connectivity = context.getSystemService(ConnectivityManager.class);
+        if (connectivity == null) {
+            return false;
+        }
+        NetworkCapabilities capabilities = connectivity.getNetworkCapabilities(connectivity.getActiveNetwork());
+        return capabilities != null && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR);
+    }
+
+    void applyNetworkPolicy() {
+        boolean allowMobile = settings.current().allowMobileDownloads;
+        int requiredNetwork = allowMobile ? Requirements.NETWORK : Requirements.NETWORK_UNMETERED;
+        manager.setRequirements(new Requirements(requiredNetwork));
     }
 
     DataSource.Factory playbackFactory() {
@@ -358,6 +470,7 @@ final class Downloads {
     }
 
     void add(List<DownloadRequest> requests) {
+        applyNetworkPolicy();
         for (DownloadRequest request : requests) {
             DownloadService.sendAddDownload(context, MusicDownloadService.class, request, true);
         }

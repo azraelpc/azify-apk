@@ -31,6 +31,8 @@
     <string name="cache_section">Cache</string>
     <string name="cache_size_value">Cache size: %1$d GB</string>
     <string name="clear_cache">Clear cache</string>
+    <string name="allow_mobile_downloads">Allow mobile data for downloads</string>
+    <string name="mobile_download_confirm">You are on mobile data. Continue and allow downloads over mobile data?</string>
     <string name="clear_cache_confirm">Are you sure to clear cache?</string>
     <string name="cache_cleared">Cache cleared</string>
     <string name="cache_clear_failed">Cannot clear cache right now.</string>

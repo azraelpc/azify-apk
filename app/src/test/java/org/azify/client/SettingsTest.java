@@ -38,6 +38,15 @@ public class SettingsTest {
         assertFalse(account.requiresPassword);
         assertFalse(account.rememberPassword);
         assertFalse(account.offlineAuthorized);
+        assertFalse(account.allowMobileDownloads);
+    }
+
+    @Test public void mobileDownloadsAreWifiOnlyByDefaultAndCanBePersisted() {
+        Settings settings = new Settings(preferences);
+        assertFalse(settings.current().allowMobileDownloads);
+        settings.setAllowMobileDownloads(true);
+        assertTrue(settings.current().allowMobileDownloads);
+        assertTrue(new Settings(preferences).current().allowMobileDownloads);
     }
 
     @Test public void initialFormHasAnEmptyServerAndDoesNotAskForAPassword() {
@@ -46,6 +55,11 @@ public class SettingsTest {
         ActivityController<MainActivity> activity = Robolectric.buildActivity(MainActivity.class).create().visible();
         try {
             activity.get().findViewById(R.id.settings).performClick();
+            Dialog settingsDialog = ShadowDialog.getLatestDialog();
+            assertNotNull(settingsDialog);
+            ((androidx.appcompat.app.AlertDialog) settingsDialog)
+                .getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE).performClick();
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
             Dialog dialog = ShadowDialog.getLatestDialog();
             assertNotNull(dialog);
             org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();

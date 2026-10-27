@@ -59,6 +59,7 @@ final class CatalogRepository {
         if (!current.sameAccount(settings.current())) {
             throw new IOException("The connection has changed. Refresh the library.");
         }
+        downloads.syncSubscribedCollections(loaded);
         downloads.saveCatalog(current.server, loaded);
         account = current;
         fetchedAt = SystemClock.elapsedRealtime();

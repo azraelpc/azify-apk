@@ -598,6 +598,12 @@ public final class MainActivity extends AppCompatActivity {
         clearCache.setFocusable(true);
         form.addView(clearCache, new LinearLayout.LayoutParams(-1, -2));
 
+        CheckBox mobileDownloads = new CheckBox(this);
+        mobileDownloads.setText(R.string.allow_mobile_downloads);
+        mobileDownloads.setChecked(account.allowMobileDownloads);
+        mobileDownloads.setPadding(0, padding / 3, 0, 0);
+        form.addView(mobileDownloads, new LinearLayout.LayoutParams(-1, -2));
+
         BandwidthUsage.Snapshot usage = BandwidthUsage.snapshot(this);
         TextView bandwidthSection = new TextView(this);
         bandwidthSection.setText(R.string.bandwidth_section);
@@ -675,6 +681,12 @@ public final class MainActivity extends AppCompatActivity {
                         }))
                         .show());
             }));
+            mobileDownloads.setOnCheckedChangeListener((button, checked) -> {
+                Settings.get(MainActivity.this).setAllowMobileDownloads(checked);
+                if (downloads != null) {
+                    downloads.applyNetworkPolicy();
+                }
+            });
             debugDownloads.setOnClickListener(view -> showDownloadedMp3DebugList());
         });
         settingsDialog.show();
@@ -1059,6 +1071,18 @@ public final class MainActivity extends AppCompatActivity {
         if (downloads == null) { return; }
         boolean removing = remove;
         if (!remove && !Settings.get(this).current().configured) { showLogin(true); return; }
+        if (!remove && !Settings.get(this).current().allowMobileDownloads && downloads.onMobileData()) {
+            new AlertDialog.Builder(this)
+                    .setMessage(R.string.mobile_download_confirm)
+                    .setNegativeButton(R.string.cancel, null)
+                    .setPositiveButton(R.string.download, (dialog, which) -> {
+                        Settings.get(MainActivity.this).setAllowMobileDownloads(true);
+                        downloads.applyNetworkPolicy();
+                        download(id, false);
+                    })
+                    .show();
+            return;
+        }
         if (!remove && android.os.Build.VERSION.SDK_INT >= 33
                 && androidx.core.content.ContextCompat.checkSelfPermission(this,
                 android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
@@ -1067,11 +1091,19 @@ public final class MainActivity extends AppCompatActivity {
         ListenableFuture<Runnable> prepared = workers.submit(() -> {
             if (remove) {
                 List<String> ids = downloads.removalIds(id);
-                return () -> downloads.remove(ids);
+                return () -> {
+                    if (Downloads.isSyncableCollectionId(id)) {
+                        downloads.setCollectionAutoSync(id, false);
+                    }
+                    downloads.remove(ids);
+                };
             }
             List<androidx.media3.exoplayer.offline.DownloadRequest> requests = downloads.requests(id);
             return () -> {
                 downloads.watchCollection(id);
+                if (Downloads.isSyncableCollectionId(id)) {
+                    downloads.setCollectionAutoSync(id, true);
+                }
                 downloads.add(requests);
             };
         });

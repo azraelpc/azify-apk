@@ -33,22 +33,23 @@ final class Settings {
         final boolean allowInsecureHttp;
         final boolean queueEnabled;
         final long cacheBytes;
+        final boolean allowMobileDownloads;
 
         Snapshot(String server, String token, boolean configured,
             boolean requiresPassword, boolean rememberPassword, boolean offlineAuthorized) {
             this(server, token, configured, requiresPassword, rememberPassword,
-                    offlineAuthorized, false, false, DEFAULT_CACHE_BYTES);
+                    offlineAuthorized, false, false, DEFAULT_CACHE_BYTES, false);
         }
 
         Snapshot(String server, String token, boolean configured, boolean requiresPassword,
                 boolean rememberPassword, boolean offlineAuthorized, boolean allowInsecureHttp) {
             this(server, token, configured, requiresPassword, rememberPassword,
-                    offlineAuthorized, allowInsecureHttp, false, DEFAULT_CACHE_BYTES);
+                    offlineAuthorized, allowInsecureHttp, false, DEFAULT_CACHE_BYTES, false);
         }
 
         Snapshot(String server, String token, boolean configured, boolean requiresPassword,
                 boolean rememberPassword, boolean offlineAuthorized, boolean allowInsecureHttp,
-                boolean queueEnabled, long cacheBytes) {
+                boolean queueEnabled, long cacheBytes, boolean allowMobileDownloads) {
             this.server = server;
             this.token = token;
             this.configured = configured;
@@ -58,6 +59,7 @@ final class Settings {
             this.allowInsecureHttp = allowInsecureHttp;
             this.queueEnabled = queueEnabled;
             this.cacheBytes = cacheBytes;
+            this.allowMobileDownloads = allowMobileDownloads;
         }
 
         boolean sameAccount(Snapshot other) {
@@ -105,11 +107,12 @@ final class Settings {
         boolean allowInsecureHttp = preferences.getBoolean("allowInsecureHttp", false);
         boolean queueEnabled = preferences.getBoolean("queueEnabled", false);
         long cacheBytes = normalizeCacheBytes(preferences.getLong("cacheBytes", DEFAULT_CACHE_BYTES));
+        boolean allowMobileDownloads = preferences.getBoolean("allowMobileDownloads", false);
         boolean transportAllowed = !server.startsWith("http://") || allowInsecureHttp;
         boolean configured = !server.isEmpty() && transportAllowed && (!requiresPassword || !token.isEmpty());
         snapshot = new Snapshot(server, token, configured, requiresPassword, rememberPassword,
             preferences.getBoolean("offlineAuthorized", false) && transportAllowed, allowInsecureHttp,
-                queueEnabled, cacheBytes);
+            queueEnabled, cacheBytes, allowMobileDownloads);
     }
 
     Snapshot current() {
@@ -155,27 +158,33 @@ final class Settings {
         }
         snapshot = new Snapshot(server, requiresPassword ? token : "", true, requiresPassword,
             remember, true, insecure && allowInsecureHttp,
-                snapshot.queueEnabled, snapshot.cacheBytes);
+                snapshot.queueEnabled, snapshot.cacheBytes, snapshot.allowMobileDownloads);
     }
 
-    synchronized void saveUiPreferences(boolean queueEnabled, long cacheBytes) {
+    synchronized void saveUiPreferences(boolean queueEnabled, long cacheBytes, boolean allowMobileDownloads) {
         long normalized = normalizeCacheBytes(cacheBytes);
         if (!preferences.edit().putBoolean("queueEnabled", queueEnabled)
-                .putLong("cacheBytes", normalized).commit()) {
+                .putLong("cacheBytes", normalized)
+                .putBoolean("allowMobileDownloads", allowMobileDownloads)
+                .commit()) {
             return;
         }
         Snapshot current = snapshot;
         snapshot = new Snapshot(current.server, current.token, current.configured, current.requiresPassword,
                 current.rememberPassword, current.offlineAuthorized, current.allowInsecureHttp,
-                queueEnabled, normalized);
+                queueEnabled, normalized, allowMobileDownloads);
     }
 
     synchronized void setQueueEnabled(boolean queueEnabled) {
-        saveUiPreferences(queueEnabled, snapshot.cacheBytes);
+        saveUiPreferences(queueEnabled, snapshot.cacheBytes, snapshot.allowMobileDownloads);
     }
 
     synchronized void setCacheBytes(long cacheBytes) {
-        saveUiPreferences(snapshot.queueEnabled, cacheBytes);
+        saveUiPreferences(snapshot.queueEnabled, cacheBytes, snapshot.allowMobileDownloads);
+    }
+
+    synchronized void setAllowMobileDownloads(boolean allowMobileDownloads) {
+        saveUiPreferences(snapshot.queueEnabled, snapshot.cacheBytes, allowMobileDownloads);
     }
 
     synchronized void signOut() {
@@ -185,9 +194,10 @@ final class Settings {
             .putBoolean("requiresPassword", requiresPassword)
                 .putBoolean("queueEnabled", snapshot.queueEnabled)
                 .putLong("cacheBytes", snapshot.cacheBytes)
+            .putBoolean("allowMobileDownloads", snapshot.allowMobileDownloads)
                 .apply();
         snapshot = new Snapshot(server, "", false, requiresPassword, false, false, false,
-                snapshot.queueEnabled, snapshot.cacheBytes);
+            snapshot.queueEnabled, snapshot.cacheBytes, snapshot.allowMobileDownloads);
     }
 
     static long normalizeCacheBytes(long requested) {
