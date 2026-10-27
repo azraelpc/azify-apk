@@ -112,13 +112,13 @@ Android/Media3 decoders and the media served by Azify.
 
 ## Downloads
 
-Use the download icon beside an album, folder or track to download it. Progress,
+Use the download icon beside an album or folder to download it. Progress,
 queued, paused, failed and downloaded states appear in the track list. Tapping
 the icon lets you start, cancel or remove downloads directly depending on the
 current state. Allow notifications to see background download progress and
 completion alerts.
 
-The foreground download notification now includes the active collection name
+The foreground download notification includes the active collection name
 (album/folder) and progress count, for example:
 `Downloading: Queen - Hits (13/17)`.
 
@@ -140,8 +140,8 @@ the process, sign in before retrying. Android battery restrictions and foregroun
 service time limits can interrupt long-running downloads.
 
 When you download an album/folder, the app keeps it synchronized with the server
-catalog: new tracks added by the admin are queued automatically, and tracks that
-disappear from the server are removed from managed offline downloads for that
+catalog: new tracks added by the AZify server owner are queued automatically, and tracks
+that disappear from the server are removed from managed offline downloads for that
 collection. This sync follows your current download network policy (Wi-Fi only
 or Wi-Fi + mobile data).
 
